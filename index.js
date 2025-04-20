@@ -224,11 +224,11 @@ function animate(currentTime) {
     player.angularVelocity.add(angularAcceleration.multiplyScalar(deltaTime));
     
     const predictedPosition = player.position.clone().add(player.linearVelocity.clone().multiplyScalar(deltaTime));
-    const predictedRotation = new THREE.Euler(
-        player.rotation.x + player.angularVelocity.x * deltaTime,
-        player.rotation.y + player.angularVelocity.y * deltaTime,
-        player.rotation.z + player.angularVelocity.z * deltaTime
-    );
+    
+    // Always apply rotation regardless of collision state
+    player.rotation.x += player.angularVelocity.x * deltaTime;
+    player.rotation.y += player.angularVelocity.y * deltaTime;
+    player.rotation.z += player.angularVelocity.z * deltaTime;
     
     // 3. Collision Detection with hilly terrain
     const terrainInfo = getTerrainInfo(predictedPosition.x);
@@ -238,45 +238,47 @@ function animate(currentTime) {
     const playerBottom = predictedPosition.y - player.radius;
     const penetrationDepth = terrainHeight - playerBottom;
     
+    let isOnGround = false;
+    
     if (penetrationDepth >= 0) {
+        isOnGround = true;
         // 4. Collision Response
         // Resolve penetration along the terrain normal
         const resolveVector = terrainNormal.clone().multiplyScalar(penetrationDepth);
         player.position.copy(predictedPosition).add(resolveVector);
         
-        // Calculate relative velocity at contact point
-        // Project the contact point along the terrain normal
-        const contactOffset = terrainNormal.clone().multiplyScalar(-player.radius);
-        const contactPointVelocity = new THREE.Vector3().crossVectors(
-            player.angularVelocity, contactOffset
-        ).add(player.linearVelocity);
+        // Calculate tangent vector to the terrain
+        const tangentVector = new THREE.Vector3(-terrainNormal.y, terrainNormal.x, 0).normalize();
+        
+        // Calculate the component of linear velocity along the tangent
+        const currentTangentialSpeed = player.linearVelocity.dot(tangentVector);
+        
+        // Calculate the desired tangential speed based on angular velocity (rolling without slipping)
+        const desiredTangentialSpeed = -player.angularVelocity.z * player.radius;
+        
+        // Apply friction to make actual tangential speed approach the desired speed
+        const speedDifference = desiredTangentialSpeed - currentTangentialSpeed;
+        const frictionStrength = 10.0; // Adjust for how quickly the ball grips the surface
+        const frictionImpulse = speedDifference * frictionStrength * deltaTime;
+        
+        // Apply the correction to linear velocity
+        player.linearVelocity.add(tangentVector.clone().multiplyScalar(frictionImpulse));
+        
+        // Also adjust angular velocity to match linear velocity for consistent rolling
+        const angularCorrection = -currentTangentialSpeed / player.radius - player.angularVelocity.z;
+        const angularCorrectionStrength = 5.0; // Adjust for how quickly angular velocity matches linear
+        player.angularVelocity.z += angularCorrection * angularCorrectionStrength * deltaTime;
         
         // Normal impulse
-        const normalVelocity = contactPointVelocity.dot(terrainNormal);
+        const normalVelocity = player.linearVelocity.dot(terrainNormal);
         if (normalVelocity < 0) { // Only apply impulse if moving into the surface
             const normalImpulse = -(1 + player.coefficientOfRestitution) * normalVelocity * player.mass;
             player.linearVelocity.add(terrainNormal.clone().multiplyScalar(normalImpulse / player.mass));
         }
-        
-        // Align linear velocity with the terrain surface
-        // Calculate tangent vector to the terrain
-        const tangentVector = new THREE.Vector3(-terrainNormal.y, terrainNormal.x, 0).normalize();
-        
-        // Apply direct rolling conversion on the tangent vector
-        const rollSpeed = -player.angularVelocity.z * player.radius * player.rollingSensitivity;
-        player.linearVelocity = tangentVector.multiplyScalar(rollSpeed);
-        
-        // Apply friction to slow down angular velocity
-        player.angularVelocity.multiplyScalar(0.98);
     } else {
         // No collision, use predicted position
         player.position.copy(predictedPosition);
-        player.rotation.copy(predictedRotation);
     }
-    
-    // 5. Update Final State
-    player.position.copy(player.position);
-    player.rotation.copy(player.rotation);
     
     // Update debug info
     debugDiv.innerHTML = `
@@ -286,6 +288,7 @@ function animate(currentTime) {
         Rotation: ${player.rotation.z.toFixed(2)}<br>
         Terrain Height: ${terrainHeight.toFixed(2)}<br>
         Terrain Normal: (${terrainNormal.x.toFixed(2)}, ${terrainNormal.y.toFixed(2)})<br>
+        On Ground: ${isOnGround}<br>
         Keys: A=${keys.a}, D=${keys.d}
     `;
     
