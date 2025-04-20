@@ -30,10 +30,12 @@ export function createPlayer(scene) {
         gravityScale: 15,
         coefficientOfFriction: 10,
         coefficientOfRestitution: 0.3,
-        airResistanceCoefficient: 0.0015,
+        airResistanceCoefficient: 0.001,
         groundResistanceCoefficient: 0.008,
         angularAirResistanceCoefficient: 0.04,
         inputTorqueMagnitude: 3000.0,
+        airControlForce: 1200.0, // Force applied for air control
+        airControlDistribution: 0.7, // 70% rotation, 30% linear movement when in air
         jumpForce: 7000.0,
         isGrounded: false,
         type: 'circle', // For collision detection
@@ -57,7 +59,7 @@ export function createPlayer(scene) {
             // Apply continuous forces/torques
             const forces = this.applyForces(keys, deltaTime);
             
-            // Apply torque
+            // Apply torque and air control
             const inputTorque = this.applyTorque(keys);
             
             // Integrate motion
@@ -85,6 +87,12 @@ export function createPlayer(scene) {
                 );
                 forces.add(groundResistance);
             }
+            // Air control when not grounded
+            else {
+                // Calculate horizontal control force in the air
+                const airControlX = this.calculateAirControl(keys);
+                forces.add(airControlX);
+            }
             
             // Jump force
             if (keys.w && this.isGrounded && this.currentSurface) {
@@ -99,12 +107,46 @@ export function createPlayer(scene) {
             return forces;
         },
         
+        // Calculate air control force
+        calculateAirControl: function(keys) {
+            let controlDirection = 0;
+            
+            if (keys.a) controlDirection -= 1;
+            if (keys.d) controlDirection += 1;
+            
+            // Apply horizontal air control force
+            if (controlDirection !== 0) {
+                // This is the portion of input that goes to linear movement (1 - airControlDistribution)
+                const linearControlFactor = 1 - this.airControlDistribution;
+                return new THREE.Vector3(
+                    controlDirection * this.airControlForce * linearControlFactor,
+                    0,
+                    0
+                );
+            }
+            
+            return new THREE.Vector3(0, 0, 0);
+        },
+        
         // Apply torque
         applyTorque: function(keys) {
             const inputTorque = new THREE.Vector3(0, 0, 0);
             
-            if (keys.a) inputTorque.z -= this.inputTorqueMagnitude;
-            if (keys.d) inputTorque.z += this.inputTorqueMagnitude;
+            let controlDirection = 0;
+            if (keys.a) controlDirection -= 1;
+            if (keys.d) controlDirection += 1;
+            
+            if (controlDirection !== 0) {
+                // Adjust torque magnitude based on whether player is in air or not
+                let torqueMagnitude = this.inputTorqueMagnitude;
+                
+                if (!this.isGrounded) {
+                    // When in air, reduce the torque by the distribution factor
+                    torqueMagnitude *= this.airControlDistribution;
+                }
+                
+                inputTorque.z += controlDirection * torqueMagnitude;
+            }
             
             // Apply air resistance to angular velocity when in the air
             if (!this.isGrounded) {

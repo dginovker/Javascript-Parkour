@@ -134,6 +134,10 @@ function animate(currentTime) {
                 surfaceNormal = `(${normal.x.toFixed(2)}, ${normal.y.toFixed(2)})`;
             }
             
+            // Format the air control distribution
+            const airControlPct = Math.round(gameState.player.airControlDistribution * 100);
+            const linearControlPct = 100 - airControlPct;
+            
             gameState.debug.innerHTML = `
                 FPS: ${gameState.fpsCounter.fps}<br>
                 Position: (${gameState.player.position.x.toFixed(2)}, ${gameState.player.position.y.toFixed(2)})<br>
@@ -141,6 +145,7 @@ function animate(currentTime) {
                 Angular Velocity: (${gameState.player.angularVelocity.z.toFixed(2)})<br>
                 Rotation: ${gameState.player.rotation.z.toFixed(2)}<br>
                 Is Grounded: ${gameState.player.isGrounded}<br>
+                Air Control: ${airControlPct}% rotation, ${linearControlPct}% linear<br>
                 Surface Type: ${surfaceType}<br>
                 Surface Normal: ${surfaceNormal}<br>
                 Collision Type: ${collisionType}<br>
