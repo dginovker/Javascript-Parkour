@@ -29,7 +29,7 @@ export function createPlayer(scene) {
         momentOfInertia: 0,
         gravityScale: 15,
         coefficientOfFriction: 10,
-        coefficientOfRestitution: 0.02,
+        coefficientOfRestitution: 0.3,
         airResistanceCoefficient: 0.0015,
         groundResistanceCoefficient: 0.008,
         angularAirResistanceCoefficient: 0.04,
