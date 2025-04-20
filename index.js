@@ -131,18 +131,21 @@ document.body.appendChild(debugDiv);
 // Track key states
 const keys = {
     a: false,
-    d: false
+    d: false,
+    w: false
 };
 
 // Handle key events
 window.addEventListener('keydown', (e) => {
     if (e.key.toLowerCase() === 'a') keys.a = true;
     if (e.key.toLowerCase() === 'd') keys.d = true;
+    if (e.key.toLowerCase() === 'w') keys.w = true;
 });
 
 window.addEventListener('keyup', (e) => {
     if (e.key.toLowerCase() === 'a') keys.a = false;
     if (e.key.toLowerCase() === 'd') keys.d = false;
+    if (e.key.toLowerCase() === 'w') keys.w = false;
 });
 
 // Handle window resize
@@ -236,7 +239,7 @@ function animate(currentTime) {
     const playerBottom = predictedPosition.y - player.radius;
     const penetrationDepth = terrainHeight - playerBottom;
         
-    if (penetrationDepth >= 0) {
+    if (penetrationDepth >= -1) {
         // 4. Collision Response
         // Resolve penetration along the terrain normal
         const resolveVector = terrainNormal.clone().multiplyScalar(penetrationDepth);
