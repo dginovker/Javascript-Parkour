@@ -37,21 +37,11 @@ export function updateCamera(camera, renderer) {
     const width = window.innerWidth;
     const height = window.innerHeight;
     
-    // Store current camera center position
-    const centerX = camera.position.x;
-    const centerY = camera.position.y;
-    
     // Update camera frustum
     camera.left = width / -2;
     camera.right = width / 2;
     camera.top = height / 2;
     camera.bottom = height / -2;
-    
-    // Reposition the frustum to the camera's center position
-    camera.left += centerX;
-    camera.right += centerX;
-    camera.top += centerY;
-    camera.bottom += centerY;
     
     // Update projection matrix with new values
     camera.updateProjectionMatrix();
