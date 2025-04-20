@@ -101,10 +101,11 @@ player.momentOfInertia = (2/5) * player.mass * player.radius * player.radius;
 player.gravityScale = 15;
 player.coefficientOfFriction = 10; // Increased for better grip
 player.coefficientOfRestitution = 0.02;
-player.airResistanceCoefficient = 0.009;
-player.angularAirResistanceCoefficient = 0.02; // New coefficient for angular air resistance
+player.airResistanceCoefficient = 0.0015;
+player.groundResistanceCoefficient = 0.008;
+player.angularAirResistanceCoefficient = 0.04; // New coefficient for angular air resistance
 player.inputTorqueMagnitude = 3000.0; // Reset to reasonable value
-player.jumpForce = 30000.0; // Force applied when jumping
+player.jumpForce = 7000.0; // Force applied when jumping
 player.isGrounded = false; // Track if player is touching the ground
 
 // State variables
@@ -225,33 +226,16 @@ function animate(currentTime) {
     if (!player.isGrounded) {
         const angularAirResistance = -player.angularAirResistanceCoefficient * player.angularVelocity.z * Math.abs(player.angularVelocity.z);
         inputTorque.z += angularAirResistance * player.momentOfInertia;
+    } else {
+        // Apply ground resistance
+        const groundResistance = player.linearVelocity.clone().multiplyScalar(-player.groundResistanceCoefficient * player.linearVelocity.length());
+        forces.add(groundResistance);    
     }
     
     // Apply jump force when W is pressed and player is grounded
     if (keys.w && player.isGrounded) {
-        // Before applying jump force, ensure tangential velocity is preserved
-        // Get terrain info at current position
-        const currentTerrainInfo = getTerrainInfo(player.position.x);
-        const terrainNormal = currentTerrainInfo.normal;
-        
-        // Calculate tangent vector to the terrain (perpendicular to normal)
-        const tangentVector = new THREE.Vector3(-terrainNormal.y, terrainNormal.x, 0).normalize();
-        
-        // Calculate current tangential velocity component (velocity along the ground)
-        const currentTangentialSpeed = player.linearVelocity.dot(tangentVector);
-        
-        // Add a bit of boost from angular velocity to make jumping feel more connected to rolling
-        const angularBoost = -player.angularVelocity.z * player.radius * 0.5;
-        const totalTangentialSpeed = currentTangentialSpeed + angularBoost;
-        
         // Apply jump force in the normal direction
         forces.y += player.jumpForce * player.mass;
-        
-        // Ensure tangential velocity is preserved
-        // First, remove any existing tangential velocity
-        player.linearVelocity.sub(tangentVector.clone().multiplyScalar(currentTangentialSpeed));
-        // Then add back the calculated tangential velocity with boost
-        player.linearVelocity.add(tangentVector.clone().multiplyScalar(totalTangentialSpeed));
         
         player.isGrounded = false; // Player is no longer grounded after jumping
     }
