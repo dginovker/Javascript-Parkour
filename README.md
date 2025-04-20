@@ -9,6 +9,5 @@ Existing features:
 
 
 To be implemented features:
-4. Whether or not you need to interact with an obstacle is efficiently checked via geospatial hashing before calculating whether or not we hit the object
+4. Make the camera follow the ball
 5. Enables multiplayer by syncing location with Ably (API key: `q7bPEw.9fpvwQ:MUr0kdXx7UgGbRPLEBKCdnMcAH-eBFQ2GrpFULH3P40`)
-6. Uses geospatial hashing to determine which other users to view in multiplayer session

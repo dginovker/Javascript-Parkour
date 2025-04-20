@@ -18,7 +18,13 @@ const gameState = {
         d: false,
         w: false
     },
-    debug: null
+    debug: null,
+    fpsCounter: {
+        frameCount: 0,
+        lastTime: 0,
+        fps: 0,
+        updateInterval: 500 // Update FPS every 500ms
+    }
 };
 
 // Initialize game
@@ -68,6 +74,9 @@ function animate(currentTime) {
     const deltaTime = (currentTime - lastTime) / 1000; // Convert to seconds
     lastTime = currentTime;
     
+    // Update FPS counter
+    updateFPS(currentTime);
+    
     if (gameState.player) {
         // Update player physics
         gameState.player.update(deltaTime, gameState.keys, gameState.ground);
@@ -109,6 +118,7 @@ function animate(currentTime) {
             }
             
             gameState.debug.innerHTML = `
+                FPS: ${gameState.fpsCounter.fps}<br>
                 Position: (${gameState.player.position.x.toFixed(2)}, ${gameState.player.position.y.toFixed(2)})<br>
                 Linear Velocity: (${gameState.player.linearVelocity.x.toFixed(2)}, ${gameState.player.linearVelocity.y.toFixed(2)})<br>
                 Angular Velocity: (${gameState.player.angularVelocity.z.toFixed(2)})<br>
@@ -128,6 +138,25 @@ function animate(currentTime) {
     
     // Render
     gameState.renderer.render(gameState.scene, gameState.camera);
+}
+
+// Update FPS counter
+function updateFPS(currentTime) {
+    // Increment frame count
+    gameState.fpsCounter.frameCount++;
+    
+    // Check if we need to update the FPS value
+    if (currentTime - gameState.fpsCounter.lastTime >= gameState.fpsCounter.updateInterval) {
+        // Calculate FPS
+        gameState.fpsCounter.fps = Math.round(
+            (gameState.fpsCounter.frameCount * 1000) / 
+            (currentTime - gameState.fpsCounter.lastTime)
+        );
+        
+        // Reset counters
+        gameState.fpsCounter.lastTime = currentTime;
+        gameState.fpsCounter.frameCount = 0;
+    }
 }
 
 // Handle window resize
