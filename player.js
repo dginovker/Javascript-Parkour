@@ -37,6 +37,8 @@ export function createPlayer(scene) {
         jumpForce: 7000.0,
         isGrounded: false,
         type: 'circle', // For collision detection
+        currentSurface: null, // Reference to current surface player is on
+        groundTolerance: 1.0, // Tolerance for ground detection - used for both terrain and obstacles
         
         // State variables
         position: new THREE.Vector3(0, 0, 0),
@@ -61,13 +63,8 @@ export function createPlayer(scene) {
             // Integrate motion
             this.integrateMotion(forces, inputTorque, deltaTime);
             
-            // Handle collisions with ground
-            this.handleGroundCollision(ground, deltaTime);
-            
-            // Handle collisions with obstacles
-            if (ground.obstacles) {
-                this.handleObstacleCollisions(ground.obstacles, deltaTime);
-            }
+            // Handle collisions with all surfaces
+            this.handleCollisions(ground, deltaTime);
         },
         
         // Apply forces
@@ -90,9 +87,13 @@ export function createPlayer(scene) {
             }
             
             // Jump force
-            if (keys.w && this.isGrounded) {
-                forces.y += this.jumpForce * this.mass;
+            if (keys.w && this.isGrounded && this.currentSurface) {
+                // Apply jump force in the normal direction
+                const normal = this.currentSurface.normal;
+                const jumpVector = normal.clone().multiplyScalar(this.jumpForce * this.mass);
+                forces.add(jumpVector);
                 this.isGrounded = false;
+                this.currentSurface = null;
             }
             
             return forces;
@@ -132,126 +133,119 @@ export function createPlayer(scene) {
             return this.position.clone().add(this.linearVelocity.clone().multiplyScalar(deltaTime));
         },
         
-        // Handle collision with ground
-        handleGroundCollision: function(ground, deltaTime) {
+        // Handle collisions with all surfaces (terrain and obstacles)
+        handleCollisions: function(ground, deltaTime) {
             // Get predicted position
             const predictedPosition = this.position.clone().add(
                 this.linearVelocity.clone().multiplyScalar(deltaTime)
             );
-            
-            // Get terrain info at predicted position
-            const terrainInfo = ground.getTerrainInfo(predictedPosition.x);
-            const terrainHeight = terrainInfo.height;
-            const terrainNormal = terrainInfo.normal;
-            
-            // Check for collision
-            const playerBottom = predictedPosition.y - this.radius;
-            const penetrationDepth = terrainHeight - playerBottom;
             
             // Reset grounded state
             this.isGrounded = false;
+            this.currentSurface = null;
             
-            if (penetrationDepth >= -1) {
-                // Player is grounded
-                this.isGrounded = true;
+            // Check collision with ground terrain
+            const terrainInfo = ground.getTerrainInfo(predictedPosition.x);
+            terrainInfo.isVertical = false; // Terrain is never vertical
+            terrainInfo.allowGrounded = true; // Terrain always allows grounding
+            
+            // Add penetration depth to terrain info for consistent handling
+            const playerBottom = predictedPosition.y - this.radius;
+            terrainInfo.penetrationDepth = terrainInfo.height - playerBottom;
+            
+            // Check collision with obstacles
+            let obstacleInfo = null;
+            if (ground.obstacles) {
+                const { findObstacleSurfaceAt } = window.require('./obstacles.js');
+                obstacleInfo = findObstacleSurfaceAt(
+                    ground.obstacles, 
+                    predictedPosition.x, 
+                    predictedPosition.y,
+                    this.radius
+                );
+            }
+            
+            // First, handle obstacle collision if there is one
+            let useTerrainCollision = true;
+            
+            if (obstacleInfo) {
+                // Handle obstacle collision first
+                const resolved = this.handleObstacleOrTerrainCollision(predictedPosition, obstacleInfo, deltaTime);
                 
-                // Resolve penetration
-                const resolveVector = terrainNormal.clone().multiplyScalar(penetrationDepth);
-                this.position.copy(predictedPosition).add(resolveVector);
-                
-                // Calculate tangent vector
-                const tangentVector = new THREE.Vector3(-terrainNormal.y, terrainNormal.x, 0).normalize();
-                
-                // Calculate tangential speeds
-                const currentTangentialSpeed = this.linearVelocity.dot(tangentVector);
-                const desiredTangentialSpeed = -this.angularVelocity.z * this.radius;
-                
-                // Apply friction
-                const speedDifference = desiredTangentialSpeed - currentTangentialSpeed;
-                const frictionImpulse = speedDifference * this.coefficientOfFriction * deltaTime;
-                
-                // Apply correction to linear velocity
-                this.linearVelocity.add(tangentVector.clone().multiplyScalar(frictionImpulse));
-                
-                // Adjust angular velocity
-                const angularCorrection = -currentTangentialSpeed / this.radius - this.angularVelocity.z;
-                const angularCorrectionStrength = 5.0;
-                this.angularVelocity.z += angularCorrection * angularCorrectionStrength * deltaTime;
-                
-                // Apply normal impulse
-                const normalVelocity = this.linearVelocity.dot(terrainNormal);
-                if (normalVelocity < 0) {
-                    const normalImpulse = -(1 + this.coefficientOfRestitution) * normalVelocity * this.mass;
-                    this.linearVelocity.add(terrainNormal.clone().multiplyScalar(normalImpulse / this.mass));
+                // If we resolved a collision with an obstacle, don't handle terrain collision
+                // unless player is below terrain level
+                useTerrainCollision = !resolved || this.position.y - this.radius < terrainInfo.height;
+            }
+            
+            // Handle collision with terrain if needed
+            if (useTerrainCollision && terrainInfo.penetrationDepth >= -this.groundTolerance) {
+                this.handleObstacleOrTerrainCollision(predictedPosition, terrainInfo, deltaTime);
+            } else if (!this.isGrounded) {
+                // No collision, use predicted position if not already modified by obstacle collision
+                if (this.position.equals(this.position)) { // If position hasn't been changed
+                    this.position.copy(predictedPosition);
                 }
-            } else {
-                // No collision, use predicted position
-                this.position.copy(predictedPosition);
             }
         },
         
-        // Handle collisions with obstacles
-        handleObstacleCollisions: function(obstacles, deltaTime) {
-            // Get predicted position
-            const predictedPosition = this.position.clone().add(
-                this.linearVelocity.clone().multiplyScalar(deltaTime)
-            );
+        // Handle collision with any surface (unified method for both terrain and obstacles)
+        handleObstacleOrTerrainCollision: function(predictedPosition, surfaceInfo, deltaTime) {
+            if (!surfaceInfo) return false;
             
-            // Check for collisions with each obstacle
-            obstacles.forEach(obstacle => {
-                // Check if circle-box collision
-                if (obstacle.type === 'box') {
-                    // Find closest point on box to circle center
-                    const closestX = Math.max(obstacle.position.x - obstacle.width/2, 
-                                   Math.min(predictedPosition.x, obstacle.position.x + obstacle.width/2));
-                    const closestY = Math.max(obstacle.position.y - obstacle.height/2, 
-                                   Math.min(predictedPosition.y, obstacle.position.y + obstacle.height/2));
-                    
-                    // Calculate distance from closest point to circle center
-                    const distanceX = predictedPosition.x - closestX;
-                    const distanceY = predictedPosition.y - closestY;
-                    const distanceSquared = distanceX * distanceX + distanceY * distanceY;
-                    
-                    // If collision detected
-                    if (distanceSquared < (this.radius * this.radius)) {
-                        // Calculate normal direction (from closest point to circle center)
-                        const normal = new THREE.Vector3(distanceX, distanceY, 0);
-                        normal.normalize();
-                        
-                        // Calculate penetration depth
-                        const penetrationDepth = this.radius - Math.sqrt(distanceSquared);
-                        
-                        // Resolve penetration
-                        const resolveVector = normal.clone().multiplyScalar(penetrationDepth);
-                        this.position.copy(predictedPosition).add(resolveVector);
-                        
-                        // Check if this collision is on top of the obstacle
-                        if (normal.y > 0.7) { // If normal is pointing mostly upward
-                            this.isGrounded = true;
-                        }
-                        
-                        // Apply normal impulse
-                        const normalVelocity = this.linearVelocity.dot(normal);
-                        if (normalVelocity < 0) {
-                            const normalImpulse = -(1 + this.coefficientOfRestitution) * normalVelocity * this.mass;
-                            this.linearVelocity.add(normal.clone().multiplyScalar(normalImpulse / this.mass));
-                        }
-                        
-                        // Apply friction
-                        if (this.isGrounded) {
-                            // Calculate tangent vector
-                            const tangent = new THREE.Vector3(-normal.y, normal.x, 0);
-                            
-                            // Calculate tangential speed
-                            const tangentialVelocity = this.linearVelocity.dot(tangent);
-                            
-                            // Apply friction impulse
-                            const frictionImpulse = tangentialVelocity * this.coefficientOfFriction * deltaTime;
-                            this.linearVelocity.sub(tangent.multiplyScalar(frictionImpulse));
-                        }
-                    }
+            const normal = surfaceInfo.normal;
+            
+            // Resolve penetration
+            const resolveVector = normal.clone().multiplyScalar(surfaceInfo.penetrationDepth);
+            this.position.copy(predictedPosition).add(resolveVector);
+            
+            // Set grounded state only for top surfaces
+            if (surfaceInfo.allowGrounded && normal.y > 0) {
+                this.isGrounded = true;
+                this.currentSurface = surfaceInfo;
+                
+                // Apply rolling physics for top surfaces
+                this.applyRollingPhysics(normal, deltaTime);
+            } else {
+                // For side/bottom collisions, just bounce
+                const normalVelocity = this.linearVelocity.dot(normal);
+                
+                if (normalVelocity < 0) {
+                    // Only bounce if we're moving into the surface
+                    const normalImpulse = -(1 + this.coefficientOfRestitution) * normalVelocity * this.mass;
+                    this.linearVelocity.add(normal.clone().multiplyScalar(normalImpulse / this.mass));
                 }
-            });
+            }
+            
+            return true; // Collision was resolved
+        },
+        
+        // Apply rolling physics (common for both terrain and obstacle top surfaces)
+        applyRollingPhysics: function(surfaceNormal, deltaTime) {
+            // Calculate tangent vector
+            const tangentVector = new THREE.Vector3(-surfaceNormal.y, surfaceNormal.x, 0).normalize();
+            
+            // Calculate tangential speeds
+            const currentTangentialSpeed = this.linearVelocity.dot(tangentVector);
+            const desiredTangentialSpeed = -this.angularVelocity.z * this.radius;
+            
+            // Apply friction
+            const speedDifference = desiredTangentialSpeed - currentTangentialSpeed;
+            const frictionImpulse = speedDifference * this.coefficientOfFriction * deltaTime;
+            
+            // Apply correction to linear velocity
+            this.linearVelocity.add(tangentVector.clone().multiplyScalar(frictionImpulse));
+            
+            // Adjust angular velocity
+            const angularCorrection = -currentTangentialSpeed / this.radius - this.angularVelocity.z;
+            const angularCorrectionStrength = 5.0;
+            this.angularVelocity.z += angularCorrection * angularCorrectionStrength * deltaTime;
+            
+            // Apply normal impulse
+            const normalVelocity = this.linearVelocity.dot(surfaceNormal);
+            if (normalVelocity < 0) {
+                const normalImpulse = -(1 + this.coefficientOfRestitution) * normalVelocity * this.mass;
+                this.linearVelocity.add(surfaceNormal.clone().multiplyScalar(normalImpulse / this.mass));
+            }
         },
         
         // Update mesh position and rotation
