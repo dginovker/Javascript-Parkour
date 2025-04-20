@@ -226,9 +226,7 @@ function animate(currentTime) {
     const predictedPosition = player.position.clone().add(player.linearVelocity.clone().multiplyScalar(deltaTime));
     
     // Always apply rotation regardless of collision state
-    player.rotation.x += player.angularVelocity.x * deltaTime;
-    player.rotation.y += player.angularVelocity.y * deltaTime;
-    player.rotation.z += player.angularVelocity.z * deltaTime;
+    player.rotation.z -= player.angularVelocity.z * deltaTime;
     
     // 3. Collision Detection with hilly terrain
     const terrainInfo = getTerrainInfo(predictedPosition.x);
@@ -237,11 +235,8 @@ function animate(currentTime) {
     
     const playerBottom = predictedPosition.y - player.radius;
     const penetrationDepth = terrainHeight - playerBottom;
-    
-    let isOnGround = false;
-    
+        
     if (penetrationDepth >= 0) {
-        isOnGround = true;
         // 4. Collision Response
         // Resolve penetration along the terrain normal
         const resolveVector = terrainNormal.clone().multiplyScalar(penetrationDepth);
@@ -288,7 +283,6 @@ function animate(currentTime) {
         Rotation: ${player.rotation.z.toFixed(2)}<br>
         Terrain Height: ${terrainHeight.toFixed(2)}<br>
         Terrain Normal: (${terrainNormal.x.toFixed(2)}, ${terrainNormal.y.toFixed(2)})<br>
-        On Ground: ${isOnGround}<br>
         Keys: A=${keys.a}, D=${keys.d}
     `;
     
