@@ -99,11 +99,13 @@ player.mass = 1.0;
 player.radius = 10;
 player.momentOfInertia = (2/5) * player.mass * player.radius * player.radius;
 player.gravityScale = 15;
-player.coefficientOfFriction = 0.8; // Increased for better grip
+player.coefficientOfFriction = 10; // Increased for better grip
 player.coefficientOfRestitution = 0.02;
-player.airResistanceCoefficient = 0.04;
-player.inputTorqueMagnitude = 3500.0; // Reset to reasonable value
-player.rollingSensitivity = 1.0; // Control rolling conversion sensitivity
+player.airResistanceCoefficient = 0.009;
+player.angularAirResistanceCoefficient = 0.02; // New coefficient for angular air resistance
+player.inputTorqueMagnitude = 3000.0; // Reset to reasonable value
+player.jumpForce = 30000.0; // Force applied when jumping
+player.isGrounded = false; // Track if player is touching the ground
 
 // State variables
 player.position = new THREE.Vector3(0, 0, 0);
@@ -219,6 +221,41 @@ function animate(currentTime) {
     if (keys.a) inputTorque.z -= player.inputTorqueMagnitude; // Counterclockwise for A (roll right)
     if (keys.d) inputTorque.z += player.inputTorqueMagnitude; // Clockwise for D (roll left)
     
+    // Apply air resistance to angular velocity when in the air
+    if (!player.isGrounded) {
+        const angularAirResistance = -player.angularAirResistanceCoefficient * player.angularVelocity.z * Math.abs(player.angularVelocity.z);
+        inputTorque.z += angularAirResistance * player.momentOfInertia;
+    }
+    
+    // Apply jump force when W is pressed and player is grounded
+    if (keys.w && player.isGrounded) {
+        // Before applying jump force, ensure tangential velocity is preserved
+        // Get terrain info at current position
+        const currentTerrainInfo = getTerrainInfo(player.position.x);
+        const terrainNormal = currentTerrainInfo.normal;
+        
+        // Calculate tangent vector to the terrain (perpendicular to normal)
+        const tangentVector = new THREE.Vector3(-terrainNormal.y, terrainNormal.x, 0).normalize();
+        
+        // Calculate current tangential velocity component (velocity along the ground)
+        const currentTangentialSpeed = player.linearVelocity.dot(tangentVector);
+        
+        // Add a bit of boost from angular velocity to make jumping feel more connected to rolling
+        const angularBoost = -player.angularVelocity.z * player.radius * 0.5;
+        const totalTangentialSpeed = currentTangentialSpeed + angularBoost;
+        
+        // Apply jump force in the normal direction
+        forces.y += player.jumpForce * player.mass;
+        
+        // Ensure tangential velocity is preserved
+        // First, remove any existing tangential velocity
+        player.linearVelocity.sub(tangentVector.clone().multiplyScalar(currentTangentialSpeed));
+        // Then add back the calculated tangential velocity with boost
+        player.linearVelocity.add(tangentVector.clone().multiplyScalar(totalTangentialSpeed));
+        
+        player.isGrounded = false; // Player is no longer grounded after jumping
+    }
+    
     // 2. Integrate Motion (Prediction)
     const linearAcceleration = forces.divideScalar(player.mass);
     const angularAcceleration = inputTorque.divideScalar(player.momentOfInertia);
@@ -238,8 +275,14 @@ function animate(currentTime) {
     
     const playerBottom = predictedPosition.y - player.radius;
     const penetrationDepth = terrainHeight - playerBottom;
+    
+    // Reset grounded state - will be set to true if collision detected
+    player.isGrounded = false;
         
     if (penetrationDepth >= -1) {
+        // Set player as grounded when in contact with terrain
+        player.isGrounded = true;
+        
         // 4. Collision Response
         // Resolve penetration along the terrain normal
         const resolveVector = terrainNormal.clone().multiplyScalar(penetrationDepth);
@@ -256,8 +299,7 @@ function animate(currentTime) {
         
         // Apply friction to make actual tangential speed approach the desired speed
         const speedDifference = desiredTangentialSpeed - currentTangentialSpeed;
-        const frictionStrength = 10.0; // Adjust for how quickly the ball grips the surface
-        const frictionImpulse = speedDifference * frictionStrength * deltaTime;
+        const frictionImpulse = speedDifference * player.coefficientOfFriction * deltaTime;
         
         // Apply the correction to linear velocity
         player.linearVelocity.add(tangentVector.clone().multiplyScalar(frictionImpulse));
@@ -286,7 +328,8 @@ function animate(currentTime) {
         Rotation: ${player.rotation.z.toFixed(2)}<br>
         Terrain Height: ${terrainHeight.toFixed(2)}<br>
         Terrain Normal: (${terrainNormal.x.toFixed(2)}, ${terrainNormal.y.toFixed(2)})<br>
-        Keys: A=${keys.a}, D=${keys.d}
+        Is Grounded: ${player.isGrounded}<br>
+        Keys: A=${keys.a}, D=${keys.d}, W=${keys.w}
     `;
     
     renderer.render(scene, camera);
