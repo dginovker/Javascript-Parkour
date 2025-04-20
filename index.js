@@ -14,7 +14,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 // Create hilly ground
-const groundBaseY = -window.innerHeight/2 + 10;
+const groundBaseY = -window.innerHeight/2 + 30;
 const groundSegments = 20;
 const groundWidth = window.innerWidth;
 const segmentWidth = groundWidth / groundSegments;
@@ -47,14 +47,58 @@ scene.add(ground);
 
 // Create player circle
 const geometry = new THREE.SphereGeometry(10, 32, 32); // radius, widthSegments, heightSegments
-const material = new THREE.MeshBasicMaterial({ color: 0x535353 });
+
+// Create face texture
+const canvas = document.createElement('canvas');
+canvas.width = 256;
+canvas.height = 256;
+const context = canvas.getContext('2d');
+
+// Draw face
+context.fillStyle = '#535353';
+context.beginPath();
+context.arc(128, 128, 128, 0, Math.PI * 2);
+context.fill();
+
+// Draw eyes
+context.fillStyle = 'white';
+context.beginPath();
+context.arc(90, 100, 15, 0, Math.PI * 2);
+context.fill();
+context.beginPath();
+context.arc(166, 100, 15, 0, Math.PI * 2);
+context.fill();
+
+// Draw pupils
+context.fillStyle = 'black';
+context.beginPath();
+context.arc(90, 100, 7, 0, Math.PI * 2);
+context.fill();
+context.beginPath();
+context.arc(166, 100, 7, 0, Math.PI * 2);
+context.fill();
+
+// Draw mouth
+context.strokeStyle = 'black';
+context.lineWidth = 8;
+context.beginPath();
+context.arc(128, 140, 30, 0, Math.PI);
+context.stroke();
+
+// Create texture from canvas
+const texture = new THREE.CanvasTexture(canvas);
+texture.needsUpdate = true; // Ensure texture updates
+const material = new THREE.MeshBasicMaterial({ 
+    map: texture,
+    side: THREE.DoubleSide // Render both sides of the texture
+});
 const player = new THREE.Mesh(geometry, material);
 
 // Physics properties
 player.mass = 1.0;
 player.radius = 10;
 player.momentOfInertia = (2/5) * player.mass * player.radius * player.radius;
-player.gravityScale = 10;
+player.gravityScale = 15;
 player.coefficientOfFriction = 0.8; // Increased for better grip
 player.coefficientOfRestitution = 0.02;
 player.airResistanceCoefficient = 0.04;
