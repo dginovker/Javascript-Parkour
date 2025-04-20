@@ -24,6 +24,12 @@ const gameState = {
         lastTime: 0,
         fps: 0,
         updateInterval: 500 // Update FPS every 500ms
+    },
+    cameraFollow: {
+        enabled: true,
+        smoothness: 0.1, // Lower values make camera more responsive, higher values make it smoother
+        offset: { x: 0, y: 100 }, // Camera offset from player position
+        bounds: { min: -Infinity, max: Infinity } // Camera bounds, can be set to limit how far the camera can move
     }
 };
 
@@ -58,6 +64,14 @@ function init() {
     // Setup input handlers
     setupInputHandlers(gameState.keys);
     
+    // Add camera controls to toggle following
+    window.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 'c') {
+            gameState.cameraFollow.enabled = !gameState.cameraFollow.enabled;
+            console.log(`Camera following: ${gameState.cameraFollow.enabled ? 'enabled' : 'disabled'}`);
+        }
+    });
+    
     // Create debug display
     gameState.debug = createDebugDisplay();
     
@@ -83,6 +97,9 @@ function animate(currentTime) {
         
         // Update obstacles if needed
         updateObstacles(gameState.obstacles, deltaTime);
+        
+        // Update camera to follow player
+        updateCameraPosition();
         
         // Update debug info
         if (gameState.debug) {
@@ -127,6 +144,7 @@ function animate(currentTime) {
                 Surface Type: ${surfaceType}<br>
                 Surface Normal: ${surfaceNormal}<br>
                 Collision Type: ${collisionType}<br>
+                Camera Following: ${gameState.cameraFollow.enabled ? 'ON' : 'OFF'} (Toggle with 'C')<br>
                 Keys: A=${gameState.keys.a}, D=${gameState.keys.d}, W=${gameState.keys.w}<br>
                 Obstacles: ${gameState.obstacles.length}
             `;
@@ -157,6 +175,29 @@ function updateFPS(currentTime) {
         gameState.fpsCounter.lastTime = currentTime;
         gameState.fpsCounter.frameCount = 0;
     }
+}
+
+// Update camera position to follow player
+function updateCameraPosition() {
+    if (!gameState.cameraFollow.enabled) return;
+    
+    const player = gameState.player;
+    const camera = gameState.camera;
+    const follow = gameState.cameraFollow;
+    
+    // Calculate target position
+    const targetX = player.position.x + follow.offset.x;
+    const targetY = player.position.y + follow.offset.y;
+    
+    // Apply bounds
+    const boundedX = Math.max(follow.bounds.min, Math.min(follow.bounds.max, targetX));
+    
+    // Apply smoothing - linear interpolation between current and target position
+    camera.position.x += (boundedX - camera.position.x) * follow.smoothness;
+    camera.position.y += (targetY - camera.position.y) * follow.smoothness;
+    
+    // Update camera's projection matrix after position change
+    camera.updateProjectionMatrix();
 }
 
 // Handle window resize
