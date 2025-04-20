@@ -1,10 +1,11 @@
-In-browser, 2d multiplayer parkour game, inspired by the Chrome no internet dinosaur game, where users are cubes.
+In-browser, 2d multiplayer parkour game, inspired by the Chrome no internet dinosaur game, where users are circular balls with a happy face so you can tell how they're spinning.
 
 Note for AI: After implementing a feature, move it to the Existing features section.
 
 Existing features:
-1. Character is a simple cube
+1. Character is a simple ball with a happy face
 2. Map is just one obstacle that you spawn on
+
 
 To be implemented features:
 3. Player can move with WASD, intacts with gravity, and does not pass through obstacles
