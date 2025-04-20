@@ -26,7 +26,6 @@ const gameState = {
         updateInterval: 500 // Update FPS every 500ms
     },
     cameraFollow: {
-        enabled: true,
         smoothness: 0.1, // Lower values make camera more responsive, higher values make it smoother
         offset: { x: 0, y: 100 }, // Camera offset from player position
         bounds: { min: -Infinity, max: Infinity } // Camera bounds, can be set to limit how far the camera can move
@@ -63,14 +62,6 @@ function init() {
     
     // Setup input handlers
     setupInputHandlers(gameState.keys);
-    
-    // Add camera controls to toggle following
-    window.addEventListener('keydown', (e) => {
-        if (e.key.toLowerCase() === 'c') {
-            gameState.cameraFollow.enabled = !gameState.cameraFollow.enabled;
-            console.log(`Camera following: ${gameState.cameraFollow.enabled ? 'enabled' : 'disabled'}`);
-        }
-    });
     
     // Create debug display
     gameState.debug = createDebugDisplay();
@@ -149,7 +140,6 @@ function animate(currentTime) {
                 Surface Type: ${surfaceType}<br>
                 Surface Normal: ${surfaceNormal}<br>
                 Collision Type: ${collisionType}<br>
-                Camera Following: ${gameState.cameraFollow.enabled ? 'ON' : 'OFF'} (Toggle with 'C')<br>
                 Keys: A=${gameState.keys.a}, D=${gameState.keys.d}, W=${gameState.keys.w}<br>
                 Obstacles: ${gameState.obstacles.length}
             `;
@@ -184,8 +174,6 @@ function updateFPS(currentTime) {
 
 // Update camera position to follow player
 function updateCameraPosition() {
-    if (!gameState.cameraFollow.enabled) return;
-    
     const player = gameState.player;
     const camera = gameState.camera;
     const follow = gameState.cameraFollow;
