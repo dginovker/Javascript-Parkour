@@ -3,30 +3,41 @@
 /**
  * Creates parkour obstacles (boxes) and adds them to the scene
  * @param {THREE.Scene} scene - The scene to add obstacles to
- * @param {Object} ground - Ground object with terrain data
+ * @param {Object} config - Configuration data from the JSON file
  * @returns {Array} Array of obstacle objects
  */
-export function createObstacles(scene, ground) {
-    const obstacles = [];
-    
-    // Create several platforms at different positions
-    createPlatform(scene, obstacles, -300, ground.baseY + 120, 120, 20);
-    createPlatform(scene, obstacles, -100, ground.baseY + 150, 80, 20);
-    createPlatform(scene, obstacles, 100, ground.baseY + 180, 100, 20);
-    createPlatform(scene, obstacles, 300, ground.baseY + 200, 60, 20);
-    
-    // Create some vertical obstacles (walls)
-    createPlatform(scene, obstacles, -200, ground.baseY + 70, 20, 60);
-    createPlatform(scene, obstacles, 200, ground.baseY + 90, 20, 100);
-    
-    // Create some stacked boxes for parkour jumping
-    for (let i = 0; i < 3; i++) {
-        createPlatform(scene, obstacles, -400 + i * 40, ground.baseY + 30 + i * 30, 30, 30);
+export async function createObstacles(scene, config) {
+    if (!config) {
+        // Load the configuration if not provided
+        const response = await fetch('world-config.json');
+        config = await response.json();
     }
     
-    // Create a staggered staircase
-    for (let i = 0; i < 5; i++) {
-        createPlatform(scene, obstacles, 400 + i * 50, ground.baseY + 30 + i * 25, 40, 20);
+    const obstacles = [];
+    
+    // Create obstacles from configuration
+    for (const obstacleConfig of config.obstacles) {
+        // Based on the obstacle type, create different kinds of platforms
+        switch (obstacleConfig.type) {
+            case 'floor':
+            case 'platform':
+            case 'wall':
+            case 'stack':
+            case 'stair':
+                const obstacle = createPlatform(
+                    scene, 
+                    obstacles, 
+                    obstacleConfig.x, 
+                    obstacleConfig.y, 
+                    obstacleConfig.width, 
+                    obstacleConfig.height,
+                    obstacleConfig.type
+                );
+                break;
+            // Add other obstacle types here if needed
+            default:
+                console.warn(`Unknown obstacle type: ${obstacleConfig.type}`);
+        }
     }
     
     return obstacles;
@@ -40,11 +51,19 @@ export function createObstacles(scene, ground) {
  * @param {number} y - Y position of the platform center
  * @param {number} width - Width of the platform
  * @param {number} height - Height of the platform
+ * @param {string} type - Type of obstacle (floor, platform, wall, etc.)
  */
-function createPlatform(scene, obstacles, x, y, width, height) {
+function createPlatform(scene, obstacles, x, y, width, height, type = 'platform') {
     // Create geometry and material
     const geometry = new THREE.BoxGeometry(width, height, 1);
-    const material = new THREE.MeshBasicMaterial({ color: 0x333333 });
+    
+    // Use different colors for different obstacle types
+    let color = 0x333333;
+    if (type === 'floor') {
+        color = 0x535353; // Use the same color as the old ground
+    }
+    
+    const material = new THREE.MeshBasicMaterial({ color: color });
     
     // Create mesh
     const mesh = new THREE.Mesh(geometry, material);
@@ -59,7 +78,7 @@ function createPlatform(scene, obstacles, x, y, width, height) {
         position: mesh.position,
         width: width,
         height: height,
-        type: 'box',
+        type: type,
         
         // Surface information for player physics
         getSurfaceInfo: function(playerX, playerY, playerRadius) {

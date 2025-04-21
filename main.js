@@ -1,5 +1,4 @@
 import { initRenderer, updateCamera } from './renderer.js';
-import { createGround } from './terrain.js';
 import { createPlayer } from './player.js';
 import { setupInputHandlers } from './input.js';
 import { createDebugDisplay } from './utils.js';
@@ -11,7 +10,6 @@ const gameState = {
     scene: null,
     renderer: null,
     camera: null,
-    ground: null,
     obstacles: [],
     keys: {
         a: false,
@@ -33,32 +31,36 @@ const gameState = {
 };
 
 // Initialize game
-function init() {
+async function init() {
     // Initialize rendering
     const { scene, renderer, camera } = initRenderer();
     gameState.scene = scene;
     gameState.renderer = renderer;
     gameState.camera = camera;
     
-    // Create terrain
-    gameState.ground = createGround(scene);
+    // Load world configuration
+    const response = await fetch('world-config.json');
+    const config = await response.json();
     
-    // Create obstacles
-    gameState.obstacles = createObstacles(scene, gameState.ground);
+    // Create obstacles using the config (including the floor)
+    gameState.obstacles = await createObstacles(scene, config);
     
-    // Add obstacles to ground for collision detection
-    gameState.ground.obstacles = gameState.obstacles;
+    // Expose the findObstacleSurfaceAt function globally for the player
+    window.findObstacleSurfaceAt = findObstacleSurfaceAt;
     
-    // Make findObstacleSurfaceAt globally available for the player physics
-    window.require = function(path) {
-        if (path === './obstacles.js') {
-            return { findObstacleSurfaceAt };
-        }
-        throw new Error('Module not found: ' + path);
-    };
+    // Find floor obstacle for reference
+    const floor = gameState.obstacles.find(obs => obs.type === 'floor');
+    if (floor) {
+        console.log("Floor object created successfully");
+    }
     
-    // Create player
+    // Create player above the floor
     gameState.player = createPlayer(scene);
+    
+    // Position player above the floor
+    if (floor) {
+        gameState.player.position.y = floor.position.y + floor.height/2 + gameState.player.radius + 50;
+    }
     
     // Setup input handlers
     setupInputHandlers(gameState.keys);
@@ -84,7 +86,7 @@ function animate(currentTime) {
     
     if (gameState.player) {
         // Update player physics
-        gameState.player.update(deltaTime, gameState.keys, gameState.ground);
+        gameState.player.update(deltaTime, gameState.keys, gameState.obstacles);
         
         // Update obstacles if needed
         updateObstacles(gameState.obstacles, deltaTime);
@@ -94,8 +96,6 @@ function animate(currentTime) {
         
         // Update debug info
         if (gameState.debug) {
-            const terrainInfo = gameState.ground.getTerrainInfo(gameState.player.position.x);
-            
             // Check for obstacle surface info
             const obstacleInfo = findObstacleSurfaceAt(
                 gameState.obstacles, 
@@ -110,15 +110,11 @@ function animate(currentTime) {
             let collisionType = "None";
             
             if (gameState.player.currentSurface) {
-                if (gameState.player.currentSurface === terrainInfo) {
-                    surfaceType = "Terrain";
+                surfaceType = "Obstacle";
+                if (gameState.player.currentSurface.isVertical) {
+                    collisionType = "Side";
                 } else {
-                    surfaceType = "Obstacle";
-                    if (gameState.player.currentSurface.isVertical) {
-                        collisionType = "Side";
-                    } else {
-                        collisionType = gameState.player.currentSurface.normal.y > 0 ? "Top" : "Bottom";
-                    }
+                    collisionType = gameState.player.currentSurface.normal.y > 0 ? "Top" : "Bottom";
                 }
                 
                 const normal = gameState.player.currentSurface.normal;

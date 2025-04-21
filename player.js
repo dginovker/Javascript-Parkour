@@ -40,7 +40,7 @@ export function createPlayer(scene) {
         isGrounded: false,
         type: 'circle', // For collision detection
         currentSurface: null, // Reference to current surface player is on
-        groundTolerance: 1.0, // Tolerance for ground detection - used for both terrain and obstacles
+        groundTolerance: 1.0, // Tolerance for ground detection
         
         // State variables
         position: new THREE.Vector3(0, 0, 0),
@@ -49,13 +49,13 @@ export function createPlayer(scene) {
         rotation: new THREE.Euler(0, 0, 0),
         
         // Update function
-        update: function(deltaTime, keys, ground) {
-            this.updatePhysics(deltaTime, keys, ground);
+        update: function(deltaTime, keys, obstacles) {
+            this.updatePhysics(deltaTime, keys, obstacles);
             this.updateMesh();
         },
         
         // Physics update
-        updatePhysics: function(deltaTime, keys, ground) {
+        updatePhysics: function(deltaTime, keys, obstacles) {
             // Apply continuous forces/torques
             const forces = this.applyForces(keys, deltaTime);
             
@@ -66,7 +66,7 @@ export function createPlayer(scene) {
             this.integrateMotion(forces, inputTorque, deltaTime);
             
             // Handle collisions with all surfaces
-            this.handleCollisions(ground, deltaTime);
+            this.handleCollisions(obstacles, deltaTime);
         },
         
         // Apply forces
@@ -175,8 +175,8 @@ export function createPlayer(scene) {
             return this.position.clone().add(this.linearVelocity.clone().multiplyScalar(deltaTime));
         },
         
-        // Handle collisions with all surfaces (terrain and obstacles)
-        handleCollisions: function(ground, deltaTime) {
+        // Handle collisions with obstacles
+        handleCollisions: function(obstacles, deltaTime) {
             // Get predicted position
             const predictedPosition = this.position.clone().add(
                 this.linearVelocity.clone().multiplyScalar(deltaTime)
@@ -186,52 +186,29 @@ export function createPlayer(scene) {
             this.isGrounded = false;
             this.currentSurface = null;
             
-            // Check collision with ground terrain
-            const terrainInfo = ground.getTerrainInfo(predictedPosition.x);
-            terrainInfo.isVertical = false; // Terrain is never vertical
-            terrainInfo.allowGrounded = true; // Terrain always allows grounding
-            
-            // Add penetration depth to terrain info for consistent handling
-            const playerBottom = predictedPosition.y - this.radius;
-            terrainInfo.penetrationDepth = terrainInfo.height - playerBottom;
-            
-            // Check collision with obstacles
-            let obstacleInfo = null;
-            if (ground.obstacles) {
-                const { findObstacleSurfaceAt } = window.require('./obstacles.js');
-                obstacleInfo = findObstacleSurfaceAt(
-                    ground.obstacles, 
-                    predictedPosition.x, 
-                    predictedPosition.y,
-                    this.radius
-                );
-            }
-            
-            // First, handle obstacle collision if there is one
-            let useTerrainCollision = true;
-            
-            if (obstacleInfo) {
-                // Handle obstacle collision first
-                const resolved = this.handleObstacleOrTerrainCollision(predictedPosition, obstacleInfo, deltaTime);
+            // Get the obstacle collision info
+            const { findObstacleSurfaceAt } = window.require ? 
+                window.require('./obstacles.js') : 
+                { findObstacleSurfaceAt: window.findObstacleSurfaceAt };
                 
-                // If we resolved a collision with an obstacle, don't handle terrain collision
-                // unless player is below terrain level
-                useTerrainCollision = !resolved || this.position.y - this.radius < terrainInfo.height;
-            }
+            const obstacleInfo = findObstacleSurfaceAt(
+                obstacles, 
+                predictedPosition.x, 
+                predictedPosition.y,
+                this.radius
+            );
             
-            // Handle collision with terrain if needed
-            if (useTerrainCollision && terrainInfo.penetrationDepth >= -this.groundTolerance) {
-                this.handleObstacleOrTerrainCollision(predictedPosition, terrainInfo, deltaTime);
-            } else if (!this.isGrounded) {
-                // No collision, use predicted position if not already modified by obstacle collision
-                if (this.position.equals(this.position)) { // If position hasn't been changed
-                    this.position.copy(predictedPosition);
-                }
+            // Handle obstacle collision if there is one
+            if (obstacleInfo) {
+                this.handleObstacleCollision(predictedPosition, obstacleInfo, deltaTime);
+            } else {
+                // No collision, use predicted position
+                this.position.copy(predictedPosition);
             }
         },
         
-        // Handle collision with any surface (unified method for both terrain and obstacles)
-        handleObstacleOrTerrainCollision: function(predictedPosition, surfaceInfo, deltaTime) {
+        // Handle collision with obstacle
+        handleObstacleCollision: function(predictedPosition, surfaceInfo, deltaTime) {
             if (!surfaceInfo) return false;
             
             const normal = surfaceInfo.normal;
@@ -248,45 +225,56 @@ export function createPlayer(scene) {
                 // Apply rolling physics for top surfaces
                 this.applyRollingPhysics(normal, deltaTime);
             } else {
-                // For side/bottom collisions, just bounce
-                const normalVelocity = this.linearVelocity.dot(normal);
-                
-                if (normalVelocity < 0) {
-                    // Only bounce if we're moving into the surface
-                    const normalImpulse = -(1 + this.coefficientOfRestitution) * normalVelocity * this.mass;
-                    this.linearVelocity.add(normal.clone().multiplyScalar(normalImpulse / this.mass));
-                }
+                // Handle side or bottom collision (bounce)
+                this.applyBouncePhysics(normal);
             }
             
-            return true; // Collision was resolved
+            return true;
         },
         
-        // Apply rolling physics (common for both terrain and obstacle top surfaces)
-        applyRollingPhysics: function(surfaceNormal, deltaTime) {
-            // Calculate tangent vector
-            const tangentVector = new THREE.Vector3(-surfaceNormal.y, surfaceNormal.x, 0).normalize();
+        // Apply rolling physics
+        applyRollingPhysics: function(normal, deltaTime) {
+            // Create a tangent vector (perpendicular to the normal)
+            const tangent = new THREE.Vector3(-normal.y, normal.x, 0).normalize();
             
-            // Calculate tangential speeds
-            const currentTangentialSpeed = this.linearVelocity.dot(tangentVector);
+            // Calculate current tangential velocity
+            const currentTangentialSpeed = this.linearVelocity.dot(tangent);
+            
+            // Calculate desired tangential speed based on angular velocity
             const desiredTangentialSpeed = -this.angularVelocity.z * this.radius;
             
-            // Apply friction
+            // Apply friction to make actual tangential speed approach desired speed
             const speedDifference = desiredTangentialSpeed - currentTangentialSpeed;
             const frictionImpulse = speedDifference * this.coefficientOfFriction * deltaTime;
             
-            // Apply correction to linear velocity
-            this.linearVelocity.add(tangentVector.clone().multiplyScalar(frictionImpulse));
+            // Apply to linear velocity
+            this.linearVelocity.add(tangent.clone().multiplyScalar(frictionImpulse));
             
-            // Adjust angular velocity
+            // Adjust angular velocity to match linear velocity for consistent rolling
             const angularCorrection = -currentTangentialSpeed / this.radius - this.angularVelocity.z;
             const angularCorrectionStrength = 5.0;
             this.angularVelocity.z += angularCorrection * angularCorrectionStrength * deltaTime;
             
-            // Apply normal impulse
-            const normalVelocity = this.linearVelocity.dot(surfaceNormal);
+            // Apply normal impulse if moving into the surface
+            const normalVelocity = this.linearVelocity.dot(normal);
             if (normalVelocity < 0) {
                 const normalImpulse = -(1 + this.coefficientOfRestitution) * normalVelocity * this.mass;
-                this.linearVelocity.add(surfaceNormal.clone().multiplyScalar(normalImpulse / this.mass));
+                this.linearVelocity.add(normal.clone().multiplyScalar(normalImpulse / this.mass));
+            }
+        },
+        
+        // Apply bounce physics
+        applyBouncePhysics: function(normal) {
+            // Calculate velocity in normal direction
+            const normalVelocity = this.linearVelocity.dot(normal);
+            
+            // Only bounce if moving into the surface
+            if (normalVelocity < 0) {
+                // Calculate bounce impulse
+                const bounceImpulse = -(1 + this.coefficientOfRestitution) * normalVelocity * this.mass;
+                
+                // Apply impulse to linear velocity
+                this.linearVelocity.add(normal.clone().multiplyScalar(bounceImpulse / this.mass));
             }
         },
         
@@ -294,17 +282,18 @@ export function createPlayer(scene) {
         updateMesh: function() {
             this.mesh.position.copy(this.position);
             this.mesh.rotation.copy(this.rotation);
+            
+            // Calculate moment of inertia for sphere
+            // I = (2/5) * m * r^2 for solid sphere
+            this.momentOfInertia = (2/5) * this.mass * this.radius * this.radius;
         }
     };
     
-    // Calculate moment of inertia for a sphere
+    // Initialize player position (will be adjusted by main.js based on floor obstacle)
+    player.position.set(0, 100, 0); // Start at origin, above ground
     player.momentOfInertia = (2/5) * player.mass * player.radius * player.radius;
     
-    // Set initial position
-    player.position.set(0, 100, 0); // Start above the terrain
-    player.updateMesh();
-    
-    // Add to scene
+    // Add player to scene
     scene.add(player.mesh);
     
     return player;
@@ -312,21 +301,21 @@ export function createPlayer(scene) {
 
 /**
  * Creates a face texture for the player
- * @returns {THREE.CanvasTexture} The face texture
+ * @returns {THREE.CanvasTexture} Texture with face drawn on it
  */
 function createFaceTexture() {
-    // Create canvas for texture
+    // Create canvas
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 256;
     const context = canvas.getContext('2d');
-
-    // Draw face background
+    
+    // Draw face
     context.fillStyle = '#535353';
     context.beginPath();
     context.arc(128, 128, 128, 0, Math.PI * 2);
     context.fill();
-
+    
     // Draw eyes
     context.fillStyle = 'white';
     context.beginPath();
@@ -335,7 +324,7 @@ function createFaceTexture() {
     context.beginPath();
     context.arc(166, 100, 15, 0, Math.PI * 2);
     context.fill();
-
+    
     // Draw pupils
     context.fillStyle = 'black';
     context.beginPath();
@@ -344,14 +333,14 @@ function createFaceTexture() {
     context.beginPath();
     context.arc(166, 100, 7, 0, Math.PI * 2);
     context.fill();
-
+    
     // Draw mouth
     context.strokeStyle = 'black';
     context.lineWidth = 8;
     context.beginPath();
     context.arc(128, 140, 30, 0, Math.PI);
     context.stroke();
-
+    
     // Create texture from canvas
     const texture = new THREE.CanvasTexture(canvas);
     texture.needsUpdate = true;
