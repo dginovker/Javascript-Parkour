@@ -26,7 +26,8 @@ export async function createObstacles(scene, config) {
             case 'stair':
                 const obstacle = createPlatform(
                     scene, 
-                    obstacles, 
+                    obstacles,
+                    obstacleConfig.id || `obstacle_${obstacles.length}`,
                     obstacleConfig.x, 
                     obstacleConfig.y, 
                     obstacleConfig.width, 
@@ -47,13 +48,14 @@ export async function createObstacles(scene, config) {
  * Creates a single platform obstacle
  * @param {THREE.Scene} scene - The scene to add the platform to
  * @param {Array} obstacles - Array to add the new obstacle to
+ * @param {string} id - Unique identifier for the obstacle
  * @param {number} x - X position of the platform center
  * @param {number} y - Y position of the platform center
  * @param {number} width - Width of the platform
  * @param {number} height - Height of the platform
  * @param {string} type - Type of obstacle (floor, platform, wall, etc.)
  */
-function createPlatform(scene, obstacles, x, y, width, height, type = 'platform') {
+function createPlatform(scene, obstacles, id, x, y, width, height, type = 'platform') {
     // Create geometry and material
     const geometry = new THREE.BoxGeometry(width, height, 1);
     
@@ -72,8 +74,15 @@ function createPlatform(scene, obstacles, x, y, width, height, type = 'platform'
     // Add to scene
     scene.add(mesh);
     
+    // Create text label with the obstacle ID
+    // Don't add label to the main floor (id 0) since it would be too large
+    if (id !== "0") {
+        createTextLabel(scene, id, x, y, width, height);
+    }
+    
     // Create obstacle object with surface information
     const obstacle = {
+        id: id,
         mesh: mesh,
         position: mesh.position,
         width: width,
@@ -131,7 +140,8 @@ function createPlatform(scene, obstacles, x, y, width, height, type = 'platform'
                 normal: normal,
                 penetrationDepth: penetrationDepth,
                 isVertical: Math.abs(normal.x) > Math.abs(normal.y),
-                allowGrounded: true // Allow grounding on all surfaces, player code will check normal.y
+                allowGrounded: true, // Allow grounding on all surfaces, player code will check normal.y
+                obstacleId: this.id // Include the obstacle ID for debugging
             };
         }
     };
@@ -140,6 +150,71 @@ function createPlatform(scene, obstacles, x, y, width, height, type = 'platform'
     obstacles.push(obstacle);
     
     return obstacle;
+}
+
+/**
+ * Creates a text label for an obstacle
+ * @param {THREE.Scene} scene - The scene to add the label to
+ * @param {string} text - The text to display
+ * @param {number} x - X position of the label
+ * @param {number} y - Y position of the label
+ * @param {number} width - Width of the parent obstacle
+ * @param {number} height - Height of the parent obstacle
+ * @returns {THREE.Object3D} The label object
+ */
+function createTextLabel(scene, text, x, y, width, height) {
+    // Create canvas for text
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    
+    // Use a much larger canvas for better resolution
+    canvas.width = 256;
+    canvas.height = 256;
+    
+    // Draw background
+    context.fillStyle = 'black';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw border
+    context.strokeStyle = 'white';
+    context.lineWidth = 8;
+    context.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+    
+    // Set text style - much larger font size
+    const fontSize = Math.min(canvas.width, canvas.height) * 0.7; // Use 70% of canvas size
+    context.font = `bold ${fontSize}px Arial`;
+    context.fillStyle = '#ffff00'; // Bright yellow for visibility
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    
+    // Draw text
+    context.fillText(text, canvas.width / 2, canvas.height / 2);
+    
+    // Create texture from canvas
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    
+    // Create sprite material
+    const material = new THREE.SpriteMaterial({ map: texture });
+    
+    // Create sprite - make it larger than the obstacle for visibility
+    const sprite = new THREE.Sprite(material);
+    
+    // Calculate scale - adjust this to make the label a good size
+    // For small obstacles, use a minimum size to ensure visibility
+    const minSize = 30; // Minimum size to ensure visibility
+    const labelWidth = Math.max(minSize, width * 0.8);
+    const labelHeight = Math.max(minSize, height * 0.8);
+    
+    sprite.scale.set(labelWidth, labelHeight, 1);
+    
+    // Place the label slightly above/in front of the obstacle
+    sprite.position.set(x, y + height/2 + labelHeight/2, 2);
+    
+    // Add to scene
+    scene.add(sprite);
+    
+    return sprite;
 }
 
 /**
@@ -174,6 +249,11 @@ export function findObstacleSurfaceAt(obstacles, x, y, radius) {
             minDistance = surfaceInfo.penetrationDepth;
             closestObstacle = obstacle;
             closestSurfaceInfo = surfaceInfo;
+            
+            // Add a reference to the obstacle for debugging
+            if (closestSurfaceInfo) {
+                closestSurfaceInfo.obstacleId = obstacle.id;
+            }
         }
     }
     

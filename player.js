@@ -190,20 +190,61 @@ export function createPlayer(scene) {
             const { findObstacleSurfaceAt } = window.require ? 
                 window.require('./obstacles.js') : 
                 { findObstacleSurfaceAt: window.findObstacleSurfaceAt };
-                
-            const obstacleInfo = findObstacleSurfaceAt(
-                obstacles, 
-                predictedPosition.x, 
-                predictedPosition.y,
-                this.radius
-            );
             
-            // Handle obstacle collision if there is one
-            if (obstacleInfo) {
-                this.handleObstacleCollision(predictedPosition, obstacleInfo, deltaTime);
+            // Check velocity magnitude to determine if we need sub-stepping
+            const velocity = this.linearVelocity.length();
+            const maxSingleStepDistance = this.radius * 0.5; // Don't move more than half the radius per test
+            
+            if (velocity * deltaTime > maxSingleStepDistance) {
+                // Use continuous collision detection for fast-moving objects
+                const stepCount = Math.ceil(velocity * deltaTime / maxSingleStepDistance);
+                const subDeltaTime = deltaTime / stepCount;
+                
+                let stepPosition = this.position.clone();
+                const stepVelocity = this.linearVelocity.clone().multiplyScalar(subDeltaTime);
+                let collisionOccurred = false;
+                
+                // Do multiple smaller steps to prevent tunneling
+                for (let i = 0; i < stepCount && !collisionOccurred; i++) {
+                    // Update step position
+                    stepPosition.add(stepVelocity);
+                    
+                    // Check collision at this sub-step
+                    const obstacleInfo = findObstacleSurfaceAt(
+                        obstacles, 
+                        stepPosition.x, 
+                        stepPosition.y,
+                        this.radius
+                    );
+                    
+                    // If collision occurred, handle it and stop sub-stepping
+                    if (obstacleInfo) {
+                        collisionOccurred = this.handleObstacleCollision(stepPosition, obstacleInfo, deltaTime);
+                        // If we hit something, no need to continue stepping
+                        break;
+                    }
+                }
+                
+                // If no collision occurred in any sub-step, use final predicted position
+                if (!collisionOccurred) {
+                    this.position.copy(predictedPosition);
+                }
             } else {
-                // No collision, use predicted position
-                this.position.copy(predictedPosition);
+                // For slower movements, check collision at the final position
+                const obstacleInfo = findObstacleSurfaceAt(
+                    obstacles, 
+                    predictedPosition.x, 
+                    predictedPosition.y,
+                    this.radius
+                );
+                
+                // Handle obstacle collision if there is one
+                if (obstacleInfo) {
+                    this.handleObstacleCollision(predictedPosition, obstacleInfo, deltaTime);
+                } else {
+                    // No collision, use predicted position
+                    this.position.copy(predictedPosition);
+                }
             }
         },
         
@@ -227,6 +268,26 @@ export function createPlayer(scene) {
             } else {
                 // Handle side or bottom collision (bounce)
                 this.applyBouncePhysics(normal);
+                
+                // Store surface info for reference
+                this.currentSurface = surfaceInfo;
+                
+                // Add extra vertical bounce for bottom collisions to prevent clipping
+                if (normal.y < 0) {
+                    // This is a bottom collision - add some extra bounce and repulsion
+                    const bottomCollisionBoost = 1.2; // Extra bounce multiplier for bottom collisions
+                    const verticalVelocity = this.linearVelocity.y;
+                    
+                    // If moving upward into bottom, give a stronger bounce
+                    if (verticalVelocity > 0) {
+                        // Apply extra upward impulse in the opposite direction
+                        const extraBounce = verticalVelocity * this.mass * bottomCollisionBoost;
+                        this.linearVelocity.y = -verticalVelocity * this.coefficientOfRestitution * bottomCollisionBoost;
+                        
+                        // Move slightly away from the surface to prevent getting stuck
+                        this.position.y -= Math.max(0.1, surfaceInfo.penetrationDepth * 0.1);
+                    }
+                }
             }
             
             return true;
@@ -275,6 +336,12 @@ export function createPlayer(scene) {
                 
                 // Apply impulse to linear velocity
                 this.linearVelocity.add(normal.clone().multiplyScalar(bounceImpulse / this.mass));
+                
+                // For horizontal surfaces, add a bit of drag to prevent endless sliding
+                if (Math.abs(normal.y) > 0.8) {  // If mostly horizontal surface
+                    const horizontalDrag = 0.95;
+                    this.linearVelocity.x *= horizontalDrag;
+                }
             }
         },
         
