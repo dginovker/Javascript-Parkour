@@ -7,7 +7,7 @@
  */
 export function createPlayer(scene) {
     // Create player geometry
-    const geometry = new THREE.SphereGeometry(10, 32, 32); // radius, widthSegments, heightSegments
+    const geometry = new THREE.SphereGeometry(20, 32, 32); // radius, widthSegments, heightSegments
     
     // Create face texture
     const texture = createFaceTexture();
@@ -24,19 +24,19 @@ export function createPlayer(scene) {
     // Physics properties
     const player = {
         mesh: mesh,
-        radius: 10,
+        radius: 20,
         mass: 1.0,
         momentOfInertia: 0,
-        gravityScale: 15,
-        coefficientOfFriction: 10,
-        coefficientOfRestitution: 0.3,
-        airResistanceCoefficient: 0.001,
-        groundResistanceCoefficient: 0.008,
-        angularAirResistanceCoefficient: 0.04,
-        inputTorqueMagnitude: 3000.0,
-        airControlForce: 1200.0, // Force applied for air control
+        gravityScale: 35,
+        coefficientOfFriction: 10, // How sticky the surface is
+        coefficientOfRestitution: 0.3, // How bouncy the surface is
+        airResistanceCoefficient: 0.001, // How much air resistance there is.
+        groundResistanceCoefficient: 0.008, // How much ground resistance there is
+        angularAirResistanceCoefficient: 0.04, // How much air resistance there is when rolling
+        inputTorqueMagnitude: 6000.0, // How much torque the player can apply
+        airControlForce: 800.0, // Force applied for air control
         airControlDistribution: 0.7, // 70% rotation, 30% linear movement when in air
-        jumpForce: 7000.0,
+        jumpForce: 10000.0,
         isGrounded: false,
         type: 'circle', // For collision detection
         currentSurface: null, // Reference to current surface player is on
@@ -69,7 +69,7 @@ export function createPlayer(scene) {
             this.handleCollisions(obstacles, deltaTime);
         },
         
-        // Apply forces
+        // Apply forces. Doesn't need deltaTime because calling method applies deltaTime
         applyForces: function(keys, deltaTime) {
             // Initialize with gravity
             const forces = new THREE.Vector3(0, -9.8 * this.gravityScale * this.mass, 0);
@@ -311,7 +311,7 @@ function createFaceTexture() {
     const context = canvas.getContext('2d');
     
     // Draw face
-    context.fillStyle = '#535353';
+    context.fillStyle = '#ee4949';
     context.beginPath();
     context.arc(128, 128, 128, 0, Math.PI * 2);
     context.fill();

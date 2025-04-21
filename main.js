@@ -130,7 +130,6 @@ function animate(currentTime) {
                 Position: (${gameState.player.position.x.toFixed(2)}, ${gameState.player.position.y.toFixed(2)})<br>
                 Linear Velocity: (${gameState.player.linearVelocity.x.toFixed(2)}, ${gameState.player.linearVelocity.y.toFixed(2)})<br>
                 Angular Velocity: (${gameState.player.angularVelocity.z.toFixed(2)})<br>
-                Rotation: ${gameState.player.rotation.z.toFixed(2)}<br>
                 Is Grounded: ${gameState.player.isGrounded}<br>
                 Air Control: ${airControlPct}% rotation, ${linearControlPct}% linear<br>
                 Surface Type: ${surfaceType}<br>
