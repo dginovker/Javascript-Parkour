@@ -97,7 +97,7 @@ function animate(currentTime) {
         // Update debug info
         if (gameState.debug) {
             // Check for obstacle surface info
-            const obstacleInfo = findObstacleSurfaceAt(
+            const obstacleCollisions = findObstacleSurfaceAt(
                 gameState.obstacles, 
                 gameState.player.position.x, 
                 gameState.player.position.y,
@@ -108,6 +108,11 @@ function animate(currentTime) {
             let surfaceType = "None";
             let surfaceNormal = "N/A";
             let collisionType = "None";
+            let collisionCount = 0;
+            
+            if (obstacleCollisions) {
+                collisionCount = obstacleCollisions.length;
+            }
             
             if (gameState.player.currentSurface) {
                 surfaceType = "Obstacle";
@@ -132,6 +137,7 @@ function animate(currentTime) {
                 Angular Velocity: (${gameState.player.angularVelocity.z.toFixed(2)})<br>
                 Is Grounded: ${gameState.player.isGrounded}<br>
                 Air Control: ${airControlPct}% rotation, ${linearControlPct}% linear<br>
+                Current Collisions: ${collisionCount}<br>
                 Surface Type: ${surfaceType}<br>
                 Surface Normal: ${surfaceNormal}<br>
                 Collision Type: ${collisionType}<br>

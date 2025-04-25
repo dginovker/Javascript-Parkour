@@ -105,43 +105,42 @@ function createPlatform(scene, obstacles, id, x, y, width, height, type = 'platf
             // Calculate vector from closest point to player center
             const contactDx = playerX - closestX;
             const contactDy = playerY - closestY;
-            const distanceSquared = contactDx * contactDx + contactDy * contactDy;
+            const contactDistanceSquared = contactDx * contactDx + contactDy * contactDy;
+            const contactDistance = Math.sqrt(contactDistanceSquared);
             
-            // Check if we're colliding or within the ground tolerance (1px)
-            const groundTolerance = 1.0; // Match with player's groundTolerance
-            if (distanceSquared > (playerRadius + groundTolerance) * (playerRadius + groundTolerance)) {
+            // Use a smaller tolerance to prevent stickiness (original was 1.0)
+            const contactTolerance = 0.1; 
+            
+            // Check if we're colliding with appropriate tolerance
+            if (contactDistance > playerRadius + contactTolerance) {
                 return null;
             }
             
             // Calculate penetration depth
-            const penetrationDepth = playerRadius - Math.sqrt(distanceSquared);
+            const penetrationDepth = playerRadius - contactDistance;
             
-            // Determine which face of the box we're hitting
-            let normal, surfaceHeight;
-            
-            // Determine if we're closer to a vertical or horizontal edge
-            if (Math.abs(contactDx) > Math.abs(contactDy)) {
-                // Horizontal collision (left or right)
-                normal = new THREE.Vector3(Math.sign(contactDx), 0, 0);
-                // Surface height is not applicable for side collisions, but we need a value
-                surfaceHeight = playerY > this.position.y ? 
-                    this.position.y + halfHeight + playerRadius : 
-                    this.position.y - halfHeight - playerRadius;
+            // Calculate normal vector
+            let normal;
+            if (contactDistance < 0.0001) {
+                // If we're exactly at the center (extremely rare), just use a default up normal
+                normal = new THREE.Vector3(0, 1, 0);
             } else {
-                // Vertical collision (top or bottom)
-                normal = new THREE.Vector3(0, Math.sign(contactDy), 0);
-                surfaceHeight = normal.y > 0 ? 
-                    this.position.y + halfHeight : 
-                    this.position.y - halfHeight;
+                // Normalize the contact vector to get the normal
+                normal = new THREE.Vector3(contactDx / contactDistance, contactDy / contactDistance, 0);
             }
             
-            return { 
-                height: surfaceHeight, 
+            // Determine surface height based on the normal and penetration depth
+            // This will work for any angle of surface
+            const surfaceHeight = contactDistance;
+            
+            // Create generic surface info object
+            return {
+                height: surfaceHeight,
                 normal: normal,
                 penetrationDepth: penetrationDepth,
                 isVertical: Math.abs(normal.x) > Math.abs(normal.y),
-                allowGrounded: true, // Allow grounding on all surfaces, player code will check normal.y
-                obstacleId: this.id // Include the obstacle ID for debugging
+                allowGrounded: true, // Always allow grounding, physics will decide based on normal
+                obstacleId: this.id
             };
         }
     };
@@ -228,34 +227,30 @@ export function updateObstacles(obstacles, deltaTime) {
 }
 
 /**
- * Find surface height and normal at a point considering all obstacles
+ * Find all surface collisions at a point considering all obstacles
  * @param {Array} obstacles - Array of all obstacles
  * @param {number} x - X coordinate to check
  * @param {number} y - Y coordinate to check
  * @param {number} radius - Radius of the player
- * @returns {Object|null} Object with surface information or null if no surface found
+ * @returns {Array|null} Array of objects with surface information or null if no surface found
  */
 export function findObstacleSurfaceAt(obstacles, x, y, radius) {
-    let closestObstacle = null;
-    let closestSurfaceInfo = null;
-    let minDistance = Infinity;
+    const collisions = [];
     
     for (const obstacle of obstacles) {
         // Get surface information for this obstacle
         const surfaceInfo = obstacle.getSurfaceInfo(x, y, radius);
         
-        // If we have a collision and it's closer than our previous closest
-        if (surfaceInfo && surfaceInfo.penetrationDepth < minDistance) {
-            minDistance = surfaceInfo.penetrationDepth;
-            closestObstacle = obstacle;
-            closestSurfaceInfo = surfaceInfo;
-            
+        // If we have a collision, add it to our collision array
+        if (surfaceInfo) {
             // Add a reference to the obstacle for debugging
-            if (closestSurfaceInfo) {
-                closestSurfaceInfo.obstacleId = obstacle.id;
-            }
+            surfaceInfo.obstacleId = obstacle.id;
+            collisions.push(surfaceInfo);
         }
     }
     
-    return closestSurfaceInfo;
+    // Sort collisions by penetration depth (deepest first)
+    collisions.sort((a, b) => b.penetrationDepth - a.penetrationDepth);
+    
+    return collisions.length > 0 ? collisions : null;
 } 
