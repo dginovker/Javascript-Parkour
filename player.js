@@ -1,13 +1,14 @@
 // Player module
 
 /**
- * Creates the player character with physics properties
+ * Creates the player character with Planck.js physics
  * @param {THREE.Scene} scene - The scene to add the player to
+ * @param {planck.World} world - The Planck.js physics world
  * @returns {Object} Player object with mesh and physics properties
  */
-export function createPlayer(scene) {
+export function createPlayer(scene, world) {
     // Create player geometry
-    const geometry = new THREE.SphereGeometry(20, 32, 32); // radius, widthSegments, heightSegments
+    const geometry = new THREE.SphereGeometry(20, 32, 32);
     
     // Create face texture
     const texture = createFaceTexture();
@@ -21,420 +22,109 @@ export function createPlayer(scene) {
     // Create mesh
     const mesh = new THREE.Mesh(geometry, material);
     
+    // Create Planck.js body
+    const body = world.createBody({
+        type: 'dynamic',
+        position: planck.Vec2(0, 100),
+        linearDamping: 0.05,
+        angularDamping: 0.1
+    });
+
+    // Create circle shape for the player
+    const shape = planck.Circle(20);
+    
+    // Create fixture with physics properties
+    body.createFixture(shape, {
+        density: 1.0,
+        friction: 0.3,
+        restitution: 0.2
+    });
+
+    // Set mass data for better control
+    body.setMassData({
+        mass: 1.0,
+        center: planck.Vec2(0, 0),
+        I: 1.0
+    });
+    
     // Physics properties
     const player = {
         mesh: mesh,
+        body: body,
         radius: 20,
-        mass: 1.0,
-        momentOfInertia: 0,
-        gravityScale: 55,
-        coefficientOfFriction: 10, // How sticky the surface is
-        coefficientOfRestitution: 0.2, // How bouncy the surface is
-        airResistanceCoefficient: 0.001, // How much air resistance there is.
-        groundResistanceCoefficient: 0.008, // How much ground resistance there is
-        angularAirResistanceCoefficient: 0.04, // How much air resistance there is when rolling
-        inputTorqueMagnitude: 6000.0, // How much torque the player can apply
-        airControlForce: 800.0, // Force applied for air control
-        airControlDistribution: 0.7, // 70% rotation, 30% linear movement when in air
-        jumpForce: 45000.0,
+        jumpForce: 30.0,
+        moveForce: 60.0,
+        maxSpeed: 400.0,
         isGrounded: false,
-        type: 'circle', // For collision detection
-        currentSurface: null, // Reference to current surface player is on
-        groundTolerance: 1.0, // Tolerance for ground detection
-        
-        // State variables
-        position: new THREE.Vector3(0, 0, 0),
-        linearVelocity: new THREE.Vector3(0, 0, 0),
-        angularVelocity: new THREE.Vector3(0, 0, 0),
-        rotation: new THREE.Euler(0, 0, 0),
+        type: 'circle',
         
         // Update function
         update: function(deltaTime, keys, obstacles) {
-            this.updatePhysics(deltaTime, keys, obstacles);
+            this.updateGrounded();
+            this.updatePhysics(keys);
             this.updateMesh();
         },
         
+        // Ground detection using Planck.js contacts
+        updateGrounded: function() {
+            let isGrounded = false;
+            for (let contact = this.body.getContactList(); contact; contact = contact.next) {
+                if (!contact.contact.isTouching()) continue;
+                const fixtureA = contact.contact.getFixtureA();
+                const fixtureB = contact.contact.getFixtureB();
+                const bodyA = fixtureA.getBody();
+                const bodyB = fixtureB.getBody();
+                // Check if the other body is not the player
+                const otherBody = (bodyA === this.body) ? bodyB : bodyA;
+                // Only check static bodies (obstacles)
+                if (otherBody.getType() !== 'static') continue;
+                // Get the world manifold to check the contact normal
+                const worldManifold = contact.contact.getWorldManifold();
+                if (worldManifold && worldManifold.normal && worldManifold.normal.y > 0.5) {
+                    isGrounded = true;
+                    break;
+                }
+            }
+            this.isGrounded = isGrounded;
+        },
+        
         // Physics update
-        updatePhysics: function(deltaTime, keys, obstacles) {
-            // Apply continuous forces/torques
-            const forces = this.applyForces(keys, deltaTime);
+        updatePhysics: function(keys) {
+            // Apply movement forces
+            if (keys.a) {
+                this.body.applyForceToCenter(planck.Vec2(-this.moveForce, 0));
+            }
+            if (keys.d) {
+                this.body.applyForceToCenter(planck.Vec2(this.moveForce, 0));
+            }
             
-            // Apply torque and air control
-            const inputTorque = this.applyTorque(keys);
-            
-            // Integrate motion
-            this.integrateMotion(forces, inputTorque, deltaTime);
-            
-            // Handle collisions with all surfaces
-            this.handleCollisions(obstacles, deltaTime);
-        },
-        
-        // Apply forces. Doesn't need deltaTime because calling method applies deltaTime
-        applyForces: function(keys, deltaTime) {
-            // Initialize with gravity
-            const forces = new THREE.Vector3(0, -9.8 * this.gravityScale * this.mass, 0);
-            
-            // Air resistance
-            const airResistance = this.linearVelocity.clone().multiplyScalar(
-                -this.airResistanceCoefficient * this.linearVelocity.length()
-            );
-            forces.add(airResistance);
-            
-            // Ground resistance when grounded
-            if (this.isGrounded) {
-                const groundResistance = this.linearVelocity.clone().multiplyScalar(
-                    -this.groundResistanceCoefficient * this.linearVelocity.length()
+            // Apply jump force
+            if (keys.w && this.isGrounded) {
+                this.body.applyLinearImpulse(
+                    planck.Vec2(0, this.jumpForce),
+                    this.body.getWorldCenter()
                 );
-                forces.add(groundResistance);
-            }
-            // Air control when not grounded
-            else {
-                // Calculate horizontal control force in the air
-                const airControlX = this.calculateAirControl(keys);
-                forces.add(airControlX);
-            }
-            
-            // Jump force
-            if (keys.w && this.isGrounded && this.currentSurface) {
-                // Apply jump force in the normal direction
-                const normal = this.currentSurface.normal;
-                const jumpVector = normal.clone().multiplyScalar(this.jumpForce * this.mass);
-                forces.add(jumpVector);
-                
-                // Immediately set not grounded and clear current surface
                 this.isGrounded = false;
-                this.currentSurface = null;
-                
-                // Add a larger position offset in the jump direction to definitively break contact
-                const jumpBoost = 2.0; // More significant boost to break contact entirely
-                this.position.add(normal.clone().multiplyScalar(jumpBoost));
             }
             
-            return forces;
-        },
-        
-        // Calculate air control force
-        calculateAirControl: function(keys) {
-            let controlDirection = 0;
-            
-            if (keys.a) controlDirection -= 1;
-            if (keys.d) controlDirection += 1;
-            
-            // Apply horizontal air control force
-            if (controlDirection !== 0) {
-                // This is the portion of input that goes to linear movement (1 - airControlDistribution)
-                const linearControlFactor = 1 - this.airControlDistribution;
-                return new THREE.Vector3(
-                    controlDirection * this.airControlForce * linearControlFactor,
-                    0,
-                    0
-                );
-            }
-            
-            return new THREE.Vector3(0, 0, 0);
-        },
-        
-        // Apply torque
-        applyTorque: function(keys) {
-            const inputTorque = new THREE.Vector3(0, 0, 0);
-            
-            let controlDirection = 0;
-            if (keys.a) controlDirection -= 1;
-            if (keys.d) controlDirection += 1;
-            
-            if (controlDirection !== 0) {
-                // Adjust torque magnitude based on whether player is in air or not
-                let torqueMagnitude = this.inputTorqueMagnitude;
-                
-                if (!this.isGrounded) {
-                    // When in air, reduce the torque by the distribution factor
-                    torqueMagnitude *= this.airControlDistribution;
-                }
-                
-                inputTorque.z += controlDirection * torqueMagnitude;
-            }
-            
-            // Apply air resistance to angular velocity when in the air
-            if (!this.isGrounded) {
-                const angularAirResistance = -this.angularAirResistanceCoefficient * 
-                    this.angularVelocity.z * Math.abs(this.angularVelocity.z);
-                inputTorque.z += angularAirResistance * this.momentOfInertia;
-            }
-            
-            return inputTorque;
-        },
-        
-        // Integrate motion
-        integrateMotion: function(forces, inputTorque, deltaTime) {
-            // Calculate accelerations
-            const linearAcceleration = forces.clone().divideScalar(this.mass);
-            const angularAcceleration = inputTorque.divideScalar(this.momentOfInertia);
-            
-            // Update velocities
-            this.linearVelocity.add(linearAcceleration.multiplyScalar(deltaTime));
-            this.angularVelocity.add(angularAcceleration.multiplyScalar(deltaTime));
-            
-            // Update rotation
-            this.rotation.z -= this.angularVelocity.z * deltaTime;
-            
-            // Predict new position
-            return this.position.clone().add(this.linearVelocity.clone().multiplyScalar(deltaTime));
-        },
-        
-        // Handle collisions with obstacles
-        handleCollisions: function(obstacles, deltaTime) {
-            // Get predicted position
-            const predictedPosition = this.position.clone().add(
-                this.linearVelocity.clone().multiplyScalar(deltaTime)
-            );
-            
-            // Reset grounded state
-            this.isGrounded = false;
-            this.currentSurface = null;
-            
-            // Get the obstacle collision info
-            const { findObstacleSurfaceAt } = window.require ? 
-                window.require('./obstacles.js') : 
-                { findObstacleSurfaceAt: window.findObstacleSurfaceAt };
-            
-            // Check velocity magnitude to determine if we need sub-stepping
-            const velocity = this.linearVelocity.length();
-            const maxSingleStepDistance = this.radius * 0.5; // Don't move more than half the radius per test
-            
-            if (velocity * deltaTime > maxSingleStepDistance) {
-                // Use continuous collision detection for fast-moving objects
-                const stepCount = Math.ceil(velocity * deltaTime / maxSingleStepDistance);
-                const subDeltaTime = deltaTime / stepCount;
-                
-                let stepPosition = this.position.clone();
-                const stepVelocity = this.linearVelocity.clone().multiplyScalar(subDeltaTime);
-                let collisionOccurred = false;
-                
-                // Do multiple smaller steps to prevent tunneling
-                for (let i = 0; i < stepCount && !collisionOccurred; i++) {
-                    // Update step position
-                    stepPosition.add(stepVelocity);
-                    
-                    // Check collision at this sub-step - returns array of all collisions
-                    const collisions = findObstacleSurfaceAt(
-                        obstacles, 
-                        stepPosition.x, 
-                        stepPosition.y,
-                        this.radius
-                    );
-                    
-                    // If collisions occurred, handle them and stop sub-stepping
-                    if (collisions && collisions.length > 0) {
-                        collisionOccurred = this.handleMultipleCollisions(stepPosition, collisions, deltaTime);
-                        // If we hit something, no need to continue stepping
-                        break;
-                    }
-                }
-                
-                // If no collision occurred in any sub-step, use final predicted position
-                if (!collisionOccurred) {
-                    this.position.copy(predictedPosition);
-                }
-            } else {
-                // For slower movements, check collision at the final position
-                const collisions = findObstacleSurfaceAt(
-                    obstacles, 
-                    predictedPosition.x, 
-                    predictedPosition.y,
-                    this.radius
-                );
-                
-                // Handle obstacle collisions if there are any
-                if (collisions && collisions.length > 0) {
-                    this.handleMultipleCollisions(predictedPosition, collisions, deltaTime);
-                } else {
-                    // No collision, use predicted position
-                    this.position.copy(predictedPosition);
-                }
-            }
-        },
-        
-        // Handle multiple collisions
-        handleMultipleCollisions: function(predictedPosition, collisions, deltaTime) {
-            if (!collisions || collisions.length === 0) return false;
-            
-            // Start from the predicted position
-            const resolvedPosition = predictedPosition.clone();
-            
-            // Use a more significant buffer factor to ensure we're pushed well outside collision zones
-            const bufferFactor = 1.1; // 10% extra resolution to definitively break contact
-            
-            // Track if we might be grounded after resolving all collisions
-            let potentialGroundNormal = null;
-            let maxUpwardNormalY = 0;
-            
-            // Separate collisions into ground and non-ground
-            const groundCollisions = [];
-            const otherCollisions = [];
-            
-            // First classify collisions
-            const groundThreshold = 0.5; // cos(60°)
-            for (const collision of collisions) {
-                if (collision.normal.y > groundThreshold) {
-                    groundCollisions.push(collision);
-                    // Track which ground collision is most significant
-                    if (collision.normal.y > maxUpwardNormalY) {
-                        maxUpwardNormalY = collision.normal.y;
-                        potentialGroundNormal = collision.normal;
-                    }
-                } else {
-                    otherCollisions.push(collision);
-                }
-            }
-            
-            // Handle ground collisions first to establish grounding
-            for (const collision of groundCollisions) {
-                const resolveVector = collision.normal.clone().multiplyScalar(collision.penetrationDepth * bufferFactor);
-                resolvedPosition.add(resolveVector);
-            }
-            
-            // If grounded, set appropriate state
-            if (potentialGroundNormal) {
-                this.isGrounded = true;
-                this.currentSurface = {
-                    normal: potentialGroundNormal,
-                    isVertical: false
-                };
-                
-                // Apply rolling physics if we're on ground (but don't apply bounce to ground)
-                this.applyRollingPhysics(potentialGroundNormal, deltaTime);
-            } else {
-                this.isGrounded = false;
-                this.currentSurface = null;
-            }
-            
-            // Handle non-ground collisions (walls, ceilings) with proper bouncing
-            for (const collision of otherCollisions) {
-                const resolveVector = collision.normal.clone().multiplyScalar(collision.penetrationDepth * bufferFactor);
-                resolvedPosition.add(resolveVector);
-                
-                // Always apply bounce for non-ground collisions regardless of grounded state
-                this.applyBouncePhysics(collision.normal);
-            }
-            
-            // Set the final resolved position
-            this.position.copy(resolvedPosition);
-            
-            return true;
-        },
-        
-        // Handle collision with obstacle
-        handleObstacleCollision: function(predictedPosition, surfaceInfo, deltaTime) {
-            if (!surfaceInfo) return false;
-            
-            const normal = surfaceInfo.normal;
-            
-            // Resolve penetration
-            const resolveVector = normal.clone().multiplyScalar(surfaceInfo.penetrationDepth);
-            this.position.copy(predictedPosition).add(resolveVector);
-            
-            // Set grounded state only for top surfaces
-            if (surfaceInfo.allowGrounded && normal.y > 0) {
-                this.isGrounded = true;
-                this.currentSurface = surfaceInfo;
-                
-                // Apply rolling physics for top surfaces
-                this.applyRollingPhysics(normal, deltaTime);
-            } else {
-                // Handle side or bottom collision (bounce)
-                this.applyBouncePhysics(normal);
-                
-                // Store surface info for reference
-                this.currentSurface = surfaceInfo;
-                
-                // Add extra vertical bounce for bottom collisions to prevent clipping
-                if (normal.y < 0) {
-                    // This is a bottom collision - add some extra bounce and repulsion
-                    const bottomCollisionBoost = 1.2; // Extra bounce multiplier for bottom collisions
-                    const verticalVelocity = this.linearVelocity.y;
-                    
-                    // If moving upward into bottom, give a stronger bounce
-                    if (verticalVelocity > 0) {
-                        // Apply extra upward impulse in the opposite direction
-                        const extraBounce = verticalVelocity * this.mass * bottomCollisionBoost;
-                        this.linearVelocity.y = -verticalVelocity * this.coefficientOfRestitution * bottomCollisionBoost;
-                        
-                        // Move slightly away from the surface to prevent getting stuck
-                        this.position.y -= Math.max(0.1, surfaceInfo.penetrationDepth * 0.1);
-                    }
-                }
-            }
-            
-            return true;
-        },
-        
-        // Apply rolling physics for smooth ground movement
-        applyRollingPhysics: function(normal, deltaTime) {
-            // Create a tangent vector (perpendicular to the normal)
-            const tangent = new THREE.Vector3(-normal.y, normal.x, 0).normalize();
-            
-            // Calculate current tangential velocity
-            const currentTangentialSpeed = this.linearVelocity.dot(tangent);
-            
-            // Calculate desired tangential speed based on angular velocity
-            const desiredTangentialSpeed = -this.angularVelocity.z * this.radius;
-            
-            // Apply friction to make actual tangential speed approach desired speed
-            const speedDifference = desiredTangentialSpeed - currentTangentialSpeed;
-            const frictionImpulse = speedDifference * this.coefficientOfFriction * deltaTime;
-            
-            // Apply to linear velocity - but do it gently to ensure smooth rolling
-            this.linearVelocity.add(tangent.clone().multiplyScalar(frictionImpulse));
-            
-            // Adjust angular velocity to match linear velocity for consistent rolling
-            // Use a gentler correction to ensure smooth rolling
-            const angularCorrection = -currentTangentialSpeed / this.radius - this.angularVelocity.z;
-            const angularCorrectionStrength = 3.0; // Reduced from 5.0 for smoother rolling
-            this.angularVelocity.z += angularCorrection * angularCorrectionStrength * deltaTime;
-            
-            // If moving into the ground, cancel out the normal component
-            // This prevents bouncing on the ground while still allowing side bounces
-            const normalVelocity = this.linearVelocity.dot(normal);
-            if (normalVelocity < 0) {
-                // Just cancel the normal component to stop sinking, but don't bounce
-                this.linearVelocity.add(normal.clone().multiplyScalar(-normalVelocity));
-            }
-        },
-        
-        // Apply bounce physics for walls and obstacles
-        applyBouncePhysics: function(normal) {
-            // Calculate velocity in normal direction
-            const normalVelocity = this.linearVelocity.dot(normal);
-            
-            // Only bounce if moving into the surface
-            if (normalVelocity < 0) {
-                // Calculate bounce impulse with restitution
-                const bounceImpulse = -(1 + this.coefficientOfRestitution) * normalVelocity * this.mass;
-                
-                // Apply impulse to linear velocity
-                this.linearVelocity.add(normal.clone().multiplyScalar(bounceImpulse / this.mass));
-                
-                // Apply a consistent, small amount of drag regardless of surface orientation
-                // Just enough to prevent perpetual motion but not cause stickiness
-                const dampingFactor = 0.97;
-                this.linearVelocity.multiplyScalar(dampingFactor);
+            // Limit maximum speed
+            const velocity = this.body.getLinearVelocity();
+            const speed = velocity.length();
+            if (speed > this.maxSpeed) {
+                velocity.mul(this.maxSpeed / speed);
+                this.body.setLinearVelocity(velocity);
             }
         },
         
         // Update mesh position and rotation
         updateMesh: function() {
-            this.mesh.position.copy(this.position);
-            this.mesh.rotation.copy(this.rotation);
+            const position = this.body.getPosition();
+            this.mesh.position.set(position.x, position.y, 0);
             
-            // Calculate moment of inertia for sphere
-            // I = (2/5) * m * r^2 for solid sphere
-            this.momentOfInertia = (2/5) * this.mass * this.radius * this.radius;
+            const angle = this.body.getAngle();
+            this.mesh.rotation.z = angle;
         }
     };
-    
-    // Initialize player position (will be adjusted by main.js based on floor obstacle)
-    player.position.set(0, 100, 0); // Start at origin, above ground
-    player.momentOfInertia = (2/5) * player.mass * player.radius * player.radius;
     
     // Add player to scene
     scene.add(player.mesh);

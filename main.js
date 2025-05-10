@@ -2,7 +2,7 @@ import { initRenderer, updateCamera } from './renderer.js';
 import { createPlayer } from './player.js';
 import { setupInputHandlers } from './input.js';
 import { createDebugDisplay } from './utils.js';
-import { createObstacles, updateObstacles, findObstacleSurfaceAt } from './obstacles.js';
+import { createObstacles, updateObstacles } from './obstacles.js';
 
 // Game state
 const gameState = {
@@ -10,6 +10,7 @@ const gameState = {
     scene: null,
     renderer: null,
     camera: null,
+    world: null,
     obstacles: [],
     keys: {
         a: false,
@@ -38,15 +39,17 @@ async function init() {
     gameState.renderer = renderer;
     gameState.camera = camera;
     
+    // Create Planck.js world
+    gameState.world = new planck.World({
+        gravity: planck.Vec2(0, -20)
+    });
+    
     // Load world configuration
     const response = await fetch('world-config.json');
     const config = await response.json();
     
-    // Create obstacles using the config (including the floor)
-    gameState.obstacles = await createObstacles(scene, config);
-    
-    // Expose the findObstacleSurfaceAt function globally for the player
-    window.findObstacleSurfaceAt = findObstacleSurfaceAt;
+    // Create obstacles using the config
+    gameState.obstacles = await createObstacles(scene, gameState.world, config);
     
     // Find floor obstacle for reference
     const floor = gameState.obstacles.find(obs => obs.type === 'floor');
@@ -55,11 +58,11 @@ async function init() {
     }
     
     // Create player above the floor
-    gameState.player = createPlayer(scene);
+    gameState.player = createPlayer(scene, gameState.world);
     
     // Position player above the floor
     if (floor) {
-        gameState.player.position.y = floor.position.y + floor.height/2 + gameState.player.radius + 50;
+        gameState.player.body.setPosition(planck.Vec2(0, floor.body.getPosition().y + floor.height/2 + gameState.player.radius + 50));
     }
     
     // Setup input handlers
@@ -85,6 +88,9 @@ function animate(currentTime) {
     updateFPS(currentTime);
     
     if (gameState.player) {
+        // Step the physics world
+        gameState.world.step(1/60, 6, 2);
+        
         // Update player physics
         gameState.player.update(deltaTime, gameState.keys, gameState.obstacles);
         
@@ -96,51 +102,35 @@ function animate(currentTime) {
         
         // Update debug info
         if (gameState.debug) {
-            // Check for obstacle surface info
-            const obstacleCollisions = findObstacleSurfaceAt(
-                gameState.obstacles, 
-                gameState.player.position.x, 
-                gameState.player.position.y,
-                gameState.player.radius
-            );
+            const position = gameState.player.body.getPosition();
+            const velocity = gameState.player.body.getLinearVelocity();
+            const angularVelocity = gameState.player.body.getAngularVelocity();
             
-            // Determine current surface type and properties
-            let surfaceType = "None";
-            let surfaceNormal = "N/A";
-            let collisionType = "None";
-            let collisionCount = 0;
-            
-            if (obstacleCollisions) {
-                collisionCount = obstacleCollisions.length;
-            }
-            
-            if (gameState.player.currentSurface) {
-                surfaceType = "Obstacle";
-                if (gameState.player.currentSurface.isVertical) {
-                    collisionType = "Side";
-                } else {
-                    collisionType = gameState.player.currentSurface.normal.y > 0 ? "Top" : "Bottom";
-                }
+            // Check if player is grounded
+            const contacts = gameState.player.body.getContactList();
+            let isGrounded = false;
+            for (let contact = contacts; contact; contact = contact.next) {
+                const fixtureA = contact.contact.getFixtureA();
+                const fixtureB = contact.contact.getFixtureB();
+                const bodyA = fixtureA.getBody();
+                const bodyB = fixtureB.getBody();
                 
-                const normal = gameState.player.currentSurface.normal;
-                surfaceNormal = `(${normal.x.toFixed(2)}, ${normal.y.toFixed(2)})`;
+                // Check if player is in contact with any obstacle
+                if (bodyA === gameState.player.body || bodyB === gameState.player.body) {
+                    const normal = contact.contact.getManifold().localNormal;
+                    if (normal.y > 0.5) { // If normal is pointing up
+                        isGrounded = true;
+                        break;
+                    }
+                }
             }
-            
-            // Format the air control distribution
-            const airControlPct = Math.round(gameState.player.airControlDistribution * 100);
-            const linearControlPct = 100 - airControlPct;
             
             gameState.debug.innerHTML = `
                 FPS: ${gameState.fpsCounter.fps}<br>
-                Position: (${gameState.player.position.x.toFixed(2)}, ${gameState.player.position.y.toFixed(2)})<br>
-                Linear Velocity: (${gameState.player.linearVelocity.x.toFixed(2)}, ${gameState.player.linearVelocity.y.toFixed(2)})<br>
-                Angular Velocity: (${gameState.player.angularVelocity.z.toFixed(2)})<br>
-                Is Grounded: ${gameState.player.isGrounded}<br>
-                Air Control: ${airControlPct}% rotation, ${linearControlPct}% linear<br>
-                Current Collisions: ${collisionCount}<br>
-                Surface Type: ${surfaceType}<br>
-                Surface Normal: ${surfaceNormal}<br>
-                Collision Type: ${collisionType}<br>
+                Position: (${position.x.toFixed(2)}, ${position.y.toFixed(2)})<br>
+                Linear Velocity: (${velocity.x.toFixed(2)}, ${velocity.y.toFixed(2)})<br>
+                Angular Velocity: ${angularVelocity.toFixed(2)}<br>
+                Is Grounded: ${isGrounded}<br>
                 Keys: A=${gameState.keys.a}, D=${gameState.keys.d}, W=${gameState.keys.w}<br>
                 Obstacles: ${gameState.obstacles.length}
             `;
@@ -179,9 +169,12 @@ function updateCameraPosition() {
     const camera = gameState.camera;
     const follow = gameState.cameraFollow;
     
+    // Get player position from physics body
+    const position = player.body.getPosition();
+    
     // Calculate target position
-    const targetX = player.position.x + follow.offset.x;
-    const targetY = player.position.y + follow.offset.y;
+    const targetX = position.x + follow.offset.x;
+    const targetY = position.y + follow.offset.y;
     
     // Apply bounds
     const boundedX = Math.max(follow.bounds.min, Math.min(follow.bounds.max, targetX));
